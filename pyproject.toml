@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memctl"
+version = "0.1.0"
+description = "A Unix-native memory control plane for LLM orchestration"
+authors = [
+    {name = "Olivier Vitrac", email = "olivier.vitrac@adservio.fr"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []  # Zero runtime dependencies — stdlib only
+
+[project.optional-dependencies]
+docs = [
+    "python-docx>=1.0.0",
+    "python-pptx>=0.6.21",
+    "openpyxl>=3.1.0",
+    "odfpy>=1.4.1",
+]
+mcp = ["mcp[cli]>=0.1.0"]
+dev = ["pytest>=7.0", "ruff"]
+all = ["memctl[docs]", "memctl[mcp]", "memctl[dev]"]
+
+[project.scripts]
+memctl = "memctl.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ovitrac/memctl"
+Repository = "https://github.com/ovitrac/memctl"
+
+[tool.setuptools.packages.find]
+include = ["memctl*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
