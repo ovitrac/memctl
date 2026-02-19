@@ -7,6 +7,14 @@ Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---
 
+## [0.2.1] - 2026-02-19
+
+### Fixed
+
+- **README**: RAGIX install instructions now use `git clone` from `ovitrac/RAGIX` (not on PyPI).
+
+---
+
 ## [0.2.0] - 2026-02-19
 
 Bounded recall-answer loop, text similarity, and demo infrastructure.
