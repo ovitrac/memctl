@@ -466,9 +466,11 @@ Schema version is tracked in `schema_meta`. Current: `SCHEMA_VERSION=1`.
 memctl is extracted from [RAGIX](https://github.com/ovitrac/RAGIX) and maintains schema-identical databases. To upgrade:
 
 ```bash
-pip install ragix[all]
+git clone git@github.com:ovitrac/RAGIX.git
+cd RAGIX
+pip install -e .[all]
 # Point at the same database — all items carry over
-ragix memory stats --db .memory/memory.db
+ragix memory stats --db /path/to/your/.memory/memory.db
 ```
 
 | Feature | memctl | RAGIX |
