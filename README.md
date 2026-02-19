@@ -136,6 +136,7 @@ memctl <command> [options]
 | `show ID` | Display a single memory item |
 | `stats` | Store statistics |
 | `consolidate [--dry-run]` | Deterministic merge of similar STM items |
+| `loop QUERY --llm CMD` | Bounded recall-answer loop with LLM |
 | `serve` | Start MCP server (requires `memctl[mcp]`) |
 
 ### Global Flags
@@ -195,6 +196,58 @@ memctl consolidate [--scope S] [--dry-run] [--json]
 
 Deterministic consolidation: clusters STM items by type + tag overlap (Jaccard), merges each cluster (longest content wins), promotes to MTM. High-usage MTM items promote to LTM. No LLM calls.
 
+#### `memctl loop`
+
+```bash
+memctl push "question" | memctl loop "question" --llm "claude -p" [--max-calls 3] [--protocol json]
+```
+
+Bounded recall-answer loop: sends context + question to an external LLM, parses its response for refinement directives, performs additional recalls from the memory store, and detects convergence. The LLM is never autonomous — it only proposes queries. The controller enforces bounds, dedup, and stopping conditions.
+
+**Protocol:** The LLM must output a JSON first line: `{"need_more": bool, "query": "...", "stop": bool}`, followed by its answer. Supported protocols: `json` (default), `regex`, `passive` (single-pass, no refinement).
+
+**Stopping conditions:**
+- `llm_stop` — LLM sets `stop: true`
+- `fixed_point` — consecutive answers are similar above threshold (default 0.92)
+- `query_cycle` — LLM re-requests a query already tried
+- `no_new_items` — recall returns no new items for the proposed query
+- `max_calls` — iteration limit reached (default 3)
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--llm CMD` | *(required)* | LLM command (e.g. `"claude -p"`, `"ollama run granite3.1:2b"`) |
+| `--llm-mode` | `stdin` | How to pass the prompt: `stdin` or `file` |
+| `--protocol` | `json` | LLM output protocol: `json`, `regex`, `passive` |
+| `--system-prompt` | *(auto)* | Custom system prompt (text or file path) |
+| `--max-calls` | `3` | Maximum LLM invocations |
+| `--threshold` | `0.92` | Answer fixed-point similarity threshold |
+| `--query-threshold` | `0.90` | Query cycle similarity threshold |
+| `--stable-steps` | `2` | Consecutive stable steps for convergence |
+| `--no-stop-on-no-new` | off | Continue even if recall returns no new items |
+| `--budget` | `2200` | Token budget for context |
+| `--trace` | off | Emit JSONL trace to stderr |
+| `--trace-file` | *(none)* | Write JSONL trace to file |
+| `--strict` | off | Exit 1 if max-calls reached without convergence |
+| `--timeout` | `300` | LLM subprocess timeout (seconds) |
+| `--replay FILE` | *(none)* | Replay a trace file (no LLM calls) |
+
+**Example pipeline:**
+
+```bash
+# Iterative recall with Claude
+memctl push "How does authentication work?" --source docs/ \
+  | memctl loop "How does authentication work?" --llm "claude -p" --trace
+
+# Sovereign local LLM
+memctl push "database schema" --source src/ \
+  | memctl loop "database schema" --llm "ollama run granite3.1:2b" --protocol json
+
+# Replay a trace (no LLM needed)
+memctl loop --replay trace.jsonl "original question"
+```
+
 ---
 
 ## Environment Variables
@@ -249,6 +302,9 @@ memctl push "project overview" --source src/ tests/ docs/ -q
 
 # Export all items as JSONL
 memctl search "" --json | jq -c '.[]'
+
+# Iterative recall-answer loop with trace
+memctl push "auth flow" --source docs/ | memctl loop "auth flow" --llm "claude -p" --trace
 ```
 
 ---
@@ -308,7 +364,9 @@ memctl/
 ├── ingest.py          Paragraph chunking, SHA-256 dedup, source resolution
 ├── policy.py          Write governance (30 patterns: secrets, injection, instructional)
 ├── config.py          Dataclass configuration
-├── cli.py             8 CLI commands
+├── similarity.py      Stdlib text similarity (Jaccard + SequenceMatcher)
+├── loop.py            Bounded recall-answer loop controller
+├── cli.py             9 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex)
 └── mcp/
@@ -317,7 +375,7 @@ memctl/
     └── server.py      FastMCP server entry point
 ```
 
-14 source files. ~4,800 lines. Zero compiled dependencies for core.
+16 source files. ~5,300 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -472,7 +530,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-210 tests covering types, store, policy, ingest, text extraction, forward compatibility, contracts, CLI (subprocess), and pipe composition.
+332 tests covering types, store, policy, ingest, text extraction, similarity, loop controller, forward compatibility, contracts, CLI (subprocess), and pipe composition.
 
 ---
 

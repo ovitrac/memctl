@@ -50,7 +50,7 @@ act_header() {
     local num="$1" title="$2"
     echo ""
     echo -e "${MAGENTA}${BOLD}┌──────────────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${MAGENTA}${BOLD}│  Act ${num}: ${title}$(printf '%*s' $((58 - ${#title})) '')│${NC}"
+    echo -e "${MAGENTA}${BOLD}│  Act ${num}: ${title}$(printf '%*s' $((58 - ${#title})) '')   │${NC}"
     echo -e "${MAGENTA}${BOLD}└──────────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
 }

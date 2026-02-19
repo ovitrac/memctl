@@ -9,6 +9,7 @@ Commands:
     memctl show   <id>                       — display single memory item
     memctl stats                             — store metrics
     memctl consolidate [--dry-run]           — merge + promote STM items
+    memctl loop   "query" --llm CMD          — bounded recall-answer loop
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -572,6 +573,104 @@ def cmd_consolidate(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: loop  (bounded recall-answer loop)
+# ===========================================================================
+
+
+def cmd_loop(args: argparse.Namespace) -> None:
+    """Run a bounded recall-answer loop with an LLM."""
+    from memctl.loop import run_loop, replay_trace
+
+    # Replay mode: just print the trace and exit
+    if getattr(args, "replay", None):
+        try:
+            traces = replay_trace(args.replay)
+        except FileNotFoundError:
+            _warn(f"Trace file not found: {args.replay}")
+            sys.exit(1)
+        for t in traces:
+            print(json.dumps(t.to_dict(), ensure_ascii=False))
+        return
+
+    # Read initial context from stdin
+    if sys.stdin.isatty():
+        _warn("[loop] No input on stdin. Pipe from 'memctl push' or provide context.")
+        sys.exit(1)
+    initial_context = sys.stdin.read()
+    if not initial_context.strip():
+        _warn("[loop] Empty input on stdin.")
+        sys.exit(1)
+
+    # Validate required --llm flag
+    llm_cmd = args.llm
+    if not llm_cmd:
+        _warn("[loop] --llm is required (e.g. --llm 'claude -p')")
+        sys.exit(1)
+
+    # Read system prompt from file if path given
+    user_system_prompt = None
+    if getattr(args, "system_prompt", None):
+        sp = args.system_prompt
+        if os.path.isfile(sp):
+            with open(sp, "r", encoding="utf-8") as f:
+                user_system_prompt = f.read()
+        else:
+            user_system_prompt = sp
+
+    # Open trace file if requested
+    trace_file = None
+    if getattr(args, "trace_file", None):
+        trace_file = open(args.trace_file, "w", encoding="utf-8")
+
+    db_path = _resolve_db(args)
+    quiet = getattr(args, "quiet", False)
+
+    try:
+        result = run_loop(
+            initial_context=initial_context,
+            query=args.query,
+            llm_cmd=llm_cmd,
+            db_path=db_path,
+            max_calls=args.max_calls,
+            threshold=args.threshold,
+            query_threshold=args.query_threshold,
+            stable_steps=args.stable_steps,
+            stop_on_no_new=not args.no_stop_on_no_new,
+            protocol=args.protocol,
+            llm_mode=args.llm_mode,
+            system_prompt=user_system_prompt,
+            budget=_resolve_budget(args),
+            strict=getattr(args, "strict", False),
+            trace=args.trace or trace_file is not None,
+            trace_file=trace_file,
+            quiet=quiet,
+            timeout=args.timeout,
+        )
+    except ValueError as e:
+        _warn(f"[loop] Protocol error: {e}")
+        sys.exit(1)
+    except RuntimeError as e:
+        _warn(f"[loop] LLM error: {e}")
+        sys.exit(1)
+    finally:
+        if trace_file is not None:
+            trace_file.close()
+
+    # Print final answer to stdout (stdout purity: only the answer)
+    print(result.answer)
+
+    # Summary to stderr
+    _info(
+        f"[loop] {result.iterations} iteration(s), "
+        f"stop={result.stop_reason}, converged={result.converged}"
+    )
+
+    # Exit code: --strict and not converged → 1
+    if getattr(args, "strict", False) and not result.converged:
+        sys.exit(1)
+
+
+# ===========================================================================
 # Command: serve  (start MCP server)
 # ===========================================================================
 
@@ -722,6 +821,74 @@ def main() -> None:
     p_cons.add_argument("--scope", default="project", help="Scope filter (default: project)")
     p_cons.add_argument("--dry-run", action="store_true", help="Compute clusters but don't write")
     p_cons.set_defaults(func=cmd_consolidate)
+
+    # -- loop --------------------------------------------------------------
+    p_loop = sub.add_parser(
+        "loop", parents=[_common],
+        help="Bounded recall-answer loop with LLM",
+    )
+    p_loop.add_argument("query", help="Question to answer via iterative recall")
+    p_loop.add_argument(
+        "--llm", required=True,
+        help="LLM command (e.g. 'claude -p', 'ollama run mistral')",
+    )
+    p_loop.add_argument(
+        "--llm-mode", choices=["stdin", "file"], default="stdin",
+        help="How to pass the prompt to the LLM (default: stdin)",
+    )
+    p_loop.add_argument(
+        "--protocol", choices=["json", "regex", "passive"], default="json",
+        help="LLM output protocol (default: json)",
+    )
+    p_loop.add_argument(
+        "--system-prompt", default=None,
+        help="User system prompt (text or file path, appended to protocol instructions)",
+    )
+    p_loop.add_argument(
+        "--max-calls", type=int, default=3,
+        help="Maximum LLM invocations (default: 3)",
+    )
+    p_loop.add_argument(
+        "--threshold", type=float, default=0.92,
+        help="Answer fixed-point similarity threshold (default: 0.92)",
+    )
+    p_loop.add_argument(
+        "--query-threshold", type=float, default=0.90,
+        help="Query cycle similarity threshold (default: 0.90)",
+    )
+    p_loop.add_argument(
+        "--stable-steps", type=int, default=2,
+        help="Consecutive stable steps for convergence (default: 2)",
+    )
+    p_loop.add_argument(
+        "--no-stop-on-no-new", action="store_true",
+        help="Continue even if recall returns no new items",
+    )
+    p_loop.add_argument(
+        "--budget", type=int, default=None,
+        help="Token budget for context (default: MEMCTL_BUDGET or 2200)",
+    )
+    p_loop.add_argument(
+        "--trace", action="store_true",
+        help="Emit JSONL trace to stderr",
+    )
+    p_loop.add_argument(
+        "--trace-file", default=None,
+        help="Write JSONL trace to file (stderr stays clean)",
+    )
+    p_loop.add_argument(
+        "--strict", action="store_true",
+        help="Exit 1 if max-calls reached without convergence",
+    )
+    p_loop.add_argument(
+        "--timeout", type=int, default=300,
+        help="LLM subprocess timeout in seconds (default: 300)",
+    )
+    p_loop.add_argument(
+        "--replay", default=None, metavar="TRACE.jsonl",
+        help="Replay a trace file (no LLM calls)",
+    )
+    p_loop.set_defaults(func=cmd_loop)
 
     # -- serve -------------------------------------------------------------
     p_serve = sub.add_parser("serve", parents=[_common], help="Start MCP server")

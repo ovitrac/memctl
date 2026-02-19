@@ -7,6 +7,27 @@ Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---
 
+## [0.2.0] - 2026-02-19
+
+Bounded recall-answer loop, text similarity, and demo infrastructure.
+
+### Added
+
+- **Stdlib text similarity** (`similarity.py`): Jaccard + SequenceMatcher combined similarity for fixed-point detection and query cycle detection. Public API: `normalize`, `tokenize`, `jaccard`, `sequence_ratio`, `similarity`, `is_fixed_point`, `is_query_cycle`. Zero-dependency, deterministic.
+- **Bounded recall-answer loop** (`loop.py`): Iterative recall-answer controller with five stopping conditions (`llm_stop`, `fixed_point`, `query_cycle`, `no_new_items`, `max_calls`). JSON/regex/passive protocols. Subprocess LLM invocation (stdin or file mode). JSONL trace emission and replay. Context merge with dedup and budget trimming.
+- **CLI `loop` subcommand** (`cli.py`): `memctl loop "query" --llm CMD` with 15 flags (`--protocol`, `--max-calls`, `--threshold`, `--trace-file`, `--replay`, etc.). Unix-composable: reads context from stdin, writes final answer to stdout.
+- **Demo infrastructure** (`demos/`):
+  - `_demo_lib.sh` — shared helpers (TTY-aware colors, capability detection, workspace management)
+  - `must_have_demo.sh` — Tier 1 launch demo: 5 core properties in ~30s, no LLM needed
+  - `advanced_demo.sh` — Tier 2 demo: loop + convergence + trace + consolidation, feature-gated
+  - `run_loop_demo.sh` — 3-act loop demo (mock LLM, Ollama, Claude)
+  - `mock_llm.sh` — deterministic mock LLM (3-iteration state machine)
+  - `corpus-mini/` — minimal 3-file corpus for Tier 1 demo
+  - `corpus/api_gateway.md`, `corpus/session_management.md` — additional corpus files
+- **Test suite** expanded to 332 tests across 11 files (+122 tests: 59 similarity, 55 loop, 8 CLI loop).
+
+---
+
 ## [0.1.0] - 2026-02-18
 
 Initial release. Extracted from RAGIX v0.62.0 memory subsystem.
@@ -26,6 +47,7 @@ Initial release. Extracted from RAGIX v0.62.0 memory subsystem.
 - **Injection format** (`mcp/formatting.py`): Stable `format_version=1` contract for token-budgeted injection blocks.
 - **Optional dependencies** (`pyproject.toml`): `[docs]` extra for Office/ODF libraries (python-docx, python-pptx, openpyxl, odfpy). `[all]` meta-extra combining docs, mcp, and dev.
 - **Test suite**: 210 tests across 9 files (types, store, policy, ingest, extract, forward compatibility, contracts, CLI subprocess, pipe composition).
+- **Demos**: `run_demo.sh` — 10-act showcase with bundled corpus and optional LLM reasoning.
 - **Documentation**: README with quickstart, CLI reference, shell integration, MCP setup, architecture, and migration guide.
 
 ### Design Decisions
