@@ -1110,13 +1110,24 @@ def cmd_serve(args: argparse.Namespace) -> None:
         _warn("MCP dependencies not installed. Run: pip install memctl[mcp]")
         sys.exit(1)
 
-    # Build server args from CLI args
+    # Build server args from CLI args (pass through v0.8 flags)
     server_argv = ["--db", _resolve_db(args)]
     fts = getattr(args, "fts_tokenizer", None)
     if fts:
         server_argv.extend(["--fts-tokenizer", fts])
     if getattr(args, "verbose", False):
         server_argv.append("--verbose")
+    # v0.8 passthrough flags
+    db_root = getattr(args, "db_root", None)
+    if db_root:
+        server_argv.extend(["--db-root", db_root])
+    if getattr(args, "secure", False):
+        server_argv.append("--secure")
+    if getattr(args, "no_rate_limit", False):
+        server_argv.append("--no-rate-limit")
+    audit_log = getattr(args, "audit_log", None)
+    if audit_log:
+        server_argv.extend(["--audit-log", audit_log])
 
     server_args = mcp_parser().parse_args(server_argv)
 
@@ -1527,6 +1538,22 @@ def main() -> None:
     p_serve.add_argument(
         "--check", action="store_true", default=False,
         help="Verify server can start (create + tool count), then exit",
+    )
+    p_serve.add_argument(
+        "--db-root", default=None,
+        help="Constrain DB paths to this directory tree (MCP security)",
+    )
+    p_serve.add_argument(
+        "--secure", action="store_true", default=False,
+        help="Enable secure defaults (db-root=CWD if not set)",
+    )
+    p_serve.add_argument(
+        "--no-rate-limit", action="store_true", default=False,
+        help="Disable MCP rate limiting",
+    )
+    p_serve.add_argument(
+        "--audit-log", default=None,
+        help="Audit log file path (default: stderr)",
     )
     p_serve.set_defaults(func=cmd_serve)
 

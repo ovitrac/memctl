@@ -2,8 +2,13 @@
 memctl MCP Tools — 14 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
-Each tool parses arguments, applies policy, and formats the response.
-Zero business logic in this layer beyond wiring.
+Each tool follows the locked middleware order:
+
+    ① Path guard       — validate db path, reject traversal (L0)
+    ② Session resolve  — get or create session from MCP context (L1)
+    ③ Rate limiter     — check read/write budget for session (L1)
+    ④ Tool execution   — guard size caps → policy → business logic (L0+L2)
+    ⑤ Audit log        — always, including on failure (L1, in finally block)
 
 Tool hierarchy:
     PRIMARY:    memory_recall    — token-budgeted injection (canonical contract)
@@ -23,6 +28,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from memctl.config import MemoryConfig
@@ -44,6 +50,11 @@ def register_memory_tools(
     store: MemoryStore,
     policy: MemoryPolicy,
     config: MemoryConfig,
+    *,
+    guard=None,
+    rate_limiter=None,
+    session_tracker=None,
+    audit=None,
 ) -> None:
     """
     Register all 14 memory MCP tools on a FastMCP server instance.
@@ -53,9 +64,34 @@ def register_memory_tools(
         store: Fully initialized MemoryStore.
         policy: MemoryPolicy for write governance.
         config: MemoryConfig for consolidation thresholds.
+        guard: ServerGuard for path/size validation (L0).
+        rate_limiter: RateLimiter for throttling (L1).
+        session_tracker: SessionTracker for session state (L1).
+        audit: AuditLogger for structured logging (L1).
     """
+    # Import middleware types only when available
+    from memctl.mcp.audit import AuditLogger
+    from memctl.mcp.guard import GuardError, ServerGuard
+    from memctl.mcp.rate_limiter import RateLimitExceeded
+    from memctl.mcp.session import DEFAULT_SESSION_ID, SessionTracker
 
     db_path = config.store.db_path
+
+    # Fallback middleware if not provided
+    if guard is None:
+        guard = ServerGuard()
+    if session_tracker is None:
+        session_tracker = SessionTracker()
+    if audit is None:
+        audit = AuditLogger()
+
+    # Compute audit db path once (root-relative)
+    from pathlib import Path
+    _audit_db = guard.relative_db_path(Path(db_path).resolve())
+
+    def _sid() -> str:
+        """Resolve session ID (FastMCP context or fallback)."""
+        return session_tracker.resolve_session_id(None)
 
     # =====================================================================
     # PRIMARY: Token-budgeted injection
@@ -86,37 +122,57 @@ def register_memory_tools(
             tokens_used: Actual tokens consumed.
             matched: Total items matching query.
         """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
+            # ③ Rate limiter (read)
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            # ④ Business logic
             raw_items = store.search_fulltext(
                 query, tier=tier, scope=scope, limit=50,
             )
+
+            # Filter non-injectable items
+            injectable = [it for it in raw_items if it.injectable]
+
+            # Build dicts for formatting
+            enriched = [_item_to_format_dict(it) for it in injectable]
+
+            inject_text = format_injection_block(
+                enriched,
+                budget_tokens=budget_tokens,
+                total_matched=len(enriched),
+                injection_type="memory_recall",
+            )
+
+            catalog = format_search_results(enriched, query=query)
+            tokens_used = len(inject_text) // 4 if inject_text else 0
+
+            detail = {"query_len": len(query), "matched": len(enriched), "tokens": tokens_used}
+
+            return {
+                "status": "ok",
+                "inject_text": inject_text,
+                "items": catalog,
+                "tokens_used": tokens_used,
+                "matched": len(enriched),
+                "format_version": FORMAT_VERSION,
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except Exception as e:
-            return {"status": "error", "message": f"Search failed: {e}"}
-
-        # Filter non-injectable items
-        injectable = [it for it in raw_items if it.injectable]
-
-        # Build dicts for formatting
-        enriched = [_item_to_format_dict(it) for it in injectable]
-
-        inject_text = format_injection_block(
-            enriched,
-            budget_tokens=budget_tokens,
-            total_matched=len(enriched),
-            injection_type="memory_recall",
-        )
-
-        catalog = format_search_results(enriched, query=query)
-        tokens_used = len(inject_text) // 4 if inject_text else 0
-
-        return {
-            "status": "ok",
-            "inject_text": inject_text,
-            "items": catalog,
-            "tokens_used": tokens_used,
-            "matched": len(enriched),
-            "format_version": FORMAT_VERSION,
-        }
+            outcome = "error"
+            return {"status": "error", "message": f"Recall failed: {e}"}
+        finally:
+            audit.log("memory_recall", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # SECONDARY: Interactive search
@@ -148,13 +204,20 @@ def register_memory_tools(
             count: Number of results.
             items: List of matching items with preview.
         """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
             if tags:
                 tag_list = [t.strip() for t in tags.split(",")]
                 raw_items = store.search_by_tags(
                     tag_list, tier=tier, scope=scope, limit=k,
                 )
-                # Post-filter by query text if both tags and query given
                 if query.strip():
                     query_lower = query.lower()
                     raw_items = [
@@ -167,24 +230,33 @@ def register_memory_tools(
                     query, tier=tier, type_filter=type_filter,
                     scope=scope, limit=k,
                 )
+
+            results = format_search_results(
+                [_item_to_format_dict(it) for it in raw_items],
+                query=query,
+            )
+
+            for i, it in enumerate(raw_items):
+                if not it.injectable:
+                    results[i]["quarantined"] = True
+
+            detail = {"query_len": len(query), "results": len(results)}
+
+            return {
+                "status": "ok",
+                "count": len(results),
+                "items": results,
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Search failed: {e}"}
-
-        results = format_search_results(
-            [_item_to_format_dict(it) for it in raw_items],
-            query=query,
-        )
-
-        # Flag non-injectable items as quarantined
-        for i, it in enumerate(raw_items):
-            if not it.injectable:
-                results[i]["quarantined"] = True
-
-        return {
-            "status": "ok",
-            "count": len(results),
-            "items": results,
-        }
+        finally:
+            audit.log("memory_search", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # WRITE PATH
@@ -213,94 +285,133 @@ def register_memory_tools(
             rejected: Count of blocked items.
             items: Per-item results with status.
         """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
-            item_list = json.loads(items)
-        except (json.JSONDecodeError, TypeError) as e:
-            return {"status": "error", "message": f"Invalid JSON in items: {e}"}
+            # ③ Rate limiter (write)
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
 
-        if not isinstance(item_list, list):
-            item_list = [item_list]
-
-        # Inject provenance from source_doc if provided
-        if source_doc:
-            for it in item_list:
-                if "provenance_hint" not in it:
-                    it["provenance_hint"] = {}
-                it["provenance_hint"]["source_id"] = source_doc
-                it["provenance_hint"]["source_kind"] = "doc"
-                it.setdefault("scope", scope)
-
-        accepted = 0
-        rejected = 0
-        quarantined = 0
-        per_item: List[Dict[str, Any]] = []
-
-        for item_d in item_list:
+            # Parse items
             try:
-                proposal = MemoryProposal.from_dict(item_d)
-                if not proposal.scope:
-                    proposal.scope = scope
+                item_list = json.loads(items)
+            except (json.JSONDecodeError, TypeError) as e:
+                outcome = "error"
+                return {"status": "error", "message": f"Invalid JSON in items: {e}"}
 
-                verdict = policy.evaluate_proposal(proposal)
+            if not isinstance(item_list, list):
+                item_list = [item_list]
 
-                if verdict.action == "reject":
-                    rejected += 1
+            # ④a Guard: size cap on total content
+            total_bytes = len(items.encode("utf-8"))
+            guard.check_write_size(items)
+            guard.check_write_budget(session_id, total_bytes)
+
+            # Rate limit proposal count
+            if rate_limiter:
+                rate_limiter.check_proposals(session_id, len(item_list))
+
+            # Inject provenance from source_doc if provided
+            if source_doc:
+                for it in item_list:
+                    if "provenance_hint" not in it:
+                        it["provenance_hint"] = {}
+                    it["provenance_hint"]["source_id"] = source_doc
+                    it["provenance_hint"]["source_kind"] = "doc"
+                    it.setdefault("scope", scope)
+
+            accepted = 0
+            rejected = 0
+            quarantined = 0
+            per_item: List[Dict[str, Any]] = []
+
+            for item_d in item_list:
+                try:
+                    proposal = MemoryProposal.from_dict(item_d)
+                    if not proposal.scope:
+                        proposal.scope = scope
+
+                    verdict = policy.evaluate_proposal(proposal)
+
+                    if verdict.action == "reject":
+                        rejected += 1
+                        per_item.append({
+                            "title": proposal.title,
+                            "action": "reject",
+                            "reasons": verdict.reasons,
+                        })
+                        continue
+
+                    mem_item = proposal.to_memory_item(
+                        tier=verdict.forced_tier or "stm",
+                        scope=proposal.scope,
+                    )
+
+                    if verdict.action == "quarantine":
+                        if verdict.forced_non_injectable:
+                            mem_item.injectable = False
+                        if verdict.forced_validation:
+                            mem_item.validation = verdict.forced_validation
+                        if verdict.forced_expires_at:
+                            mem_item.expires_at = verdict.forced_expires_at
+                        quarantined += 1
+
+                    store.write_item(mem_item, reason="propose")
+                    accepted += 1
                     per_item.append({
-                        "title": proposal.title,
-                        "action": "reject",
+                        "id": mem_item.id,
+                        "title": mem_item.title,
+                        "action": verdict.action,
                         "reasons": verdict.reasons,
                     })
-                    continue
 
-                # Convert proposal to item
-                mem_item = proposal.to_memory_item(
-                    tier=verdict.forced_tier or "stm",
-                    scope=proposal.scope,
-                )
+                except Exception as e:
+                    rejected += 1
+                    per_item.append({
+                        "title": item_d.get("title", "(unknown)"),
+                        "action": "error",
+                        "reasons": [str(e)],
+                    })
 
-                # Apply quarantine flags
-                if verdict.action == "quarantine":
-                    if verdict.forced_non_injectable:
-                        mem_item.injectable = False
-                    if verdict.forced_validation:
-                        mem_item.validation = verdict.forced_validation
-                    if verdict.forced_expires_at:
-                        mem_item.expires_at = verdict.forced_expires_at
-                    quarantined += 1
+            detail = {
+                "proposed": len(item_list),
+                "accepted": accepted,
+                "rejected": rejected,
+                "quarantined": quarantined,
+                "bytes": total_bytes,
+            }
 
-                store.write_item(mem_item, reason="propose")
-                accepted += 1
-                per_item.append({
-                    "id": mem_item.id,
-                    "title": mem_item.title,
-                    "action": verdict.action,
-                    "reasons": verdict.reasons,
-                })
+            result: Dict[str, Any] = {
+                "status": "ok",
+                "accepted": accepted,
+                "rejected": rejected,
+                "quarantined": quarantined,
+                "items": per_item,
+            }
 
-            except Exception as e:
-                rejected += 1
-                per_item.append({
-                    "title": item_d.get("title", "(unknown)"),
-                    "action": "error",
-                    "reasons": [str(e)],
-                })
+            if accepted > 0:
+                consol = _maybe_auto_consolidate(store, config, scope=scope)
+                if consol is not None:
+                    result["consolidation_triggered"] = True
+                    result["consolidation_merged"] = consol.get("items_merged", 0)
 
-        result: Dict[str, Any] = {
-            "status": "ok",
-            "accepted": accepted,
-            "rejected": rejected,
-            "quarantined": quarantined,
-            "items": per_item,
-        }
+            return result
 
-        # Auto-consolidation trigger
-        if accepted > 0:
-            consol = _maybe_auto_consolidate(store, config, scope=scope)
-            if consol is not None:
-                result["consolidation_triggered"] = True
-                result["consolidation_merged"] = consol.get("items_merged", 0)
-
-        return result
+        except GuardError as e:
+            outcome = "error"
+            return {"status": "error", "message": str(e)}
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Propose failed: {e}"}
+        finally:
+            audit.log("memory_propose", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     @mcp.tool()
     def memory_write(
@@ -328,40 +439,78 @@ def register_memory_tools(
         Returns:
             id: Stored item ID (or rejection reason).
         """
-        tag_list = [t.strip() for t in tags.split(",")] if tags else []
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        policy_detail = None
+        try:
+            # ③ Rate limiter (write)
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
 
-        item = MemoryItem(
-            tier=tier,
-            type=type,
-            title=title,
-            content=content,
-            tags=tag_list,
-            scope=scope,
-            provenance=MemoryProvenance(
-                source_kind="tool",
-                source_id="memory_write",
-            ),
-        )
+            # ④a Guard: size cap
+            guard.check_write_size(content)
+            content_bytes = len(content.encode("utf-8"))
+            guard.check_write_budget(session_id, content_bytes)
 
-        verdict = policy.evaluate_item(item)
-        if verdict.action == "reject":
+            tag_list = [t.strip() for t in tags.split(",")] if tags else []
+
+            item = MemoryItem(
+                tier=tier,
+                type=type,
+                title=title,
+                content=content,
+                tags=tag_list,
+                scope=scope,
+                provenance=MemoryProvenance(
+                    source_kind="tool",
+                    source_id="memory_write",
+                ),
+            )
+
+            # ④b Policy (L2)
+            verdict = policy.evaluate_item(item)
+            if verdict.reasons:
+                policy_detail = {"action": verdict.action, "rule": verdict.reasons[0]}
+
+            if verdict.action == "reject":
+                outcome = "rejected"
+                detail = audit.make_content_detail(content, policy_detail)
+                return {
+                    "status": "rejected",
+                    "reasons": verdict.reasons,
+                }
+
+            if verdict.action == "quarantine":
+                if verdict.forced_non_injectable:
+                    item.injectable = False
+                if verdict.forced_validation:
+                    item.validation = verdict.forced_validation
+
+            # ④c Business logic
+            store.write_item(item, reason="write")
+            detail = audit.make_content_detail(content, policy_detail)
+
             return {
-                "status": "rejected",
-                "reasons": verdict.reasons,
+                "status": "ok",
+                "id": item.id,
+                "action": verdict.action,
             }
 
-        if verdict.action == "quarantine":
-            if verdict.forced_non_injectable:
-                item.injectable = False
-            if verdict.forced_validation:
-                item.validation = verdict.forced_validation
-
-        store.write_item(item, reason="write")
-        return {
-            "status": "ok",
-            "id": item.id,
-            "action": verdict.action,
-        }
+        except GuardError as e:
+            outcome = "error"
+            return {"status": "error", "message": str(e)}
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Write failed: {e}"}
+        finally:
+            audit.log("memory_write", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # CRUD
@@ -379,14 +528,34 @@ def register_memory_tools(
         Returns:
             items: Full item data for each found ID.
         """
-        id_list = [i.strip() for i in ids.split(",") if i.strip()]
-        items = store.read_items(id_list)
-        return {
-            "status": "ok",
-            "items": [it.to_dict() for it in items],
-            "found": len(items),
-            "requested": len(id_list),
-        }
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            id_list = [i.strip() for i in ids.split(",") if i.strip()]
+            found_items = store.read_items(id_list)
+            detail = {"ids": len(id_list)}
+            return {
+                "status": "ok",
+                "items": [it.to_dict() for it in found_items],
+                "found": len(found_items),
+                "requested": len(id_list),
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Read failed: {e}"}
+        finally:
+            audit.log("memory_read", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # LIFECYCLE
@@ -409,13 +578,33 @@ def register_memory_tools(
         Returns:
             Consolidation results (clusters merged, items promoted, etc.).
         """
-        pipeline = ConsolidationPipeline(store, config.consolidate)
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
+
+            pipeline = ConsolidationPipeline(store, config.consolidate)
             stats = pipeline.run(scope=scope, dry_run=dry_run)
+            detail = {
+                "merged": stats.get("items_merged", 0),
+                "archived": stats.get("items_archived", 0),
+            }
             stats["status"] = "ok"
             return stats
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Consolidation failed: {e}"}
+        finally:
+            audit.log("memory_consolidate", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     @mcp.tool()
     def memory_stats(
@@ -429,10 +618,22 @@ def register_memory_tools(
         Returns:
             total_items, by_tier, by_type, events_count, fts5_available, etc.
         """
-        stats = store.stats()
-        stats["status"] = "ok"
-        stats["format_version"] = FORMAT_VERSION
-        return stats
+        # EXEMPT from rate limiting (health-check must always respond)
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        try:
+            stats = store.stats()
+            stats["status"] = "ok"
+            stats["format_version"] = FORMAT_VERSION
+            return stats
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Stats failed: {e}"}
+        finally:
+            audit.log("memory_stats", rid, session_id, _audit_db,
+                      outcome, {}, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # FOLDER: mount, sync, inspect, ask  (v0.7)
@@ -463,11 +664,18 @@ def register_memory_tools(
         Returns:
             mount_id and path (register), mounts list (list), or removal status.
         """
-        from memctl.mount import register_mount, list_mounts, remove_mount
-
+        # EXEMPT from rate limiting (metadata-only)
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {"action": action}
         try:
+            from memctl.mount import register_mount, list_mounts, remove_mount
+
             if action == "register":
                 if not path:
+                    outcome = "error"
                     return {"status": "error", "message": "path is required for register"}
                 ignore = (
                     [p.strip() for p in ignore_patterns.split(",") if p.strip()]
@@ -479,6 +687,7 @@ def register_memory_tools(
                     ignore_patterns=ignore,
                     lang_hint=lang,
                 )
+                detail["path"] = path
                 return {"status": "ok", "mount_id": mid, "path": path}
 
             elif action == "list":
@@ -487,20 +696,28 @@ def register_memory_tools(
 
             elif action == "remove":
                 if not mount_id:
+                    outcome = "error"
                     return {"status": "error", "message": "mount_id is required for remove"}
                 ok = remove_mount(db_path, mount_id)
                 if ok:
                     return {"status": "ok", "removed": mount_id}
                 else:
+                    outcome = "error"
                     return {"status": "error", "message": f"Mount not found: {mount_id}"}
 
             else:
+                outcome = "error"
                 return {"status": "error", "message": f"Unknown action: {action}"}
 
         except (FileNotFoundError, NotADirectoryError) as e:
+            outcome = "error"
             return {"status": "error", "message": str(e)}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Mount failed: {e}"}
+        finally:
+            audit.log("memory_mount", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     @mcp.tool()
     def memory_sync(
@@ -520,15 +737,28 @@ def register_memory_tools(
         Returns:
             Sync statistics (files scanned, new, changed, chunks created).
         """
-        from memctl.sync import sync_mount, sync_all
-
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
+
+            from memctl.sync import sync_mount, sync_all
+
             if path:
                 result = sync_mount(
                     db_path, path,
                     delta=not full,
                     quiet=True,
                 )
+                detail = {
+                    "synced": 1,
+                    "new": result.files_new,
+                    "updated": result.files_changed,
+                }
                 return {
                     "status": "ok",
                     "files_scanned": result.files_scanned,
@@ -539,17 +769,35 @@ def register_memory_tools(
             else:
                 results = sync_all(db_path, delta=not full, quiet=True)
                 synced = {}
+                total_new = 0
+                total_changed = 0
                 for p, r in results.items():
                     synced[p] = r.to_dict()
+                    total_new += r.files_new
+                    total_changed += r.files_changed
+                detail = {
+                    "synced": len(results),
+                    "new": total_new,
+                    "updated": total_changed,
+                }
                 return {
                     "status": "ok",
                     "synced": synced,
                     "mount_count": len(results),
                 }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except (FileNotFoundError, NotADirectoryError) as e:
+            outcome = "error"
             return {"status": "error", "message": str(e)}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Sync failed: {e}"}
+        finally:
+            audit.log("memory_sync", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     @mcp.tool()
     def memory_inspect(
@@ -575,20 +823,26 @@ def register_memory_tools(
         Returns:
             inject_text (text mode) or stats dict (json mode).
         """
-        from memctl.inspect import inspect_path, inspect_mount, inspect_stats
-
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {"format": output_format}
         try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            from memctl.inspect import inspect_path, inspect_mount, inspect_stats
+
             if path:
+                detail["path"] = path
                 result = inspect_path(
                     db_path, path,
                     sync_mode=sync_mode,
                     budget=budget,
                 )
                 if output_format == "json":
-                    return {
-                        "status": "ok",
-                        **result.to_dict(),
-                    }
+                    return {"status": "ok", **result.to_dict()}
                 else:
                     text = inspect_mount(
                         db_path,
@@ -610,15 +864,10 @@ def register_memory_tools(
                     stats = inspect_stats(db_path, mount_id=mount_id)
                     return {"status": "ok", **stats}
                 else:
-                    text = inspect_mount(
-                        db_path,
-                        mount_id=mount_id,
-                        budget=budget,
-                    )
+                    text = inspect_mount(db_path, mount_id=mount_id, budget=budget)
                     return {"status": "ok", "inject_text": text}
 
             else:
-                # Whole store
                 if output_format == "json":
                     stats = inspect_stats(db_path)
                     return {"status": "ok", **stats}
@@ -626,10 +875,18 @@ def register_memory_tools(
                     text = inspect_mount(db_path, budget=budget)
                     return {"status": "ok", "inject_text": text}
 
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except (FileNotFoundError, NotADirectoryError, ValueError) as e:
+            outcome = "error"
             return {"status": "error", "message": str(e)}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Inspect failed: {e}"}
+        finally:
+            audit.log("memory_inspect", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     @mcp.tool()
     def memory_ask(
@@ -664,9 +921,17 @@ def register_memory_tools(
         Returns:
             answer, mount_id, loop_iterations, stop_reason, converged.
         """
-        from memctl.ask import ask_folder
-
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {"question_len": len(question)}
         try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            from memctl.ask import ask_folder
+
             result = ask_folder(
                 path=path,
                 question=question,
@@ -690,12 +955,22 @@ def register_memory_tools(
                 "stop_reason": result.stop_reason,
                 "converged": result.converged,
             }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except (FileNotFoundError, NotADirectoryError, ValueError) as e:
+            outcome = "error"
             return {"status": "error", "message": str(e)}
         except RuntimeError as e:
+            outcome = "error"
             return {"status": "error", "message": f"LLM error: {e}"}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Ask failed: {e}"}
+        finally:
+            audit.log("memory_ask", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # DATA: export, import  (v0.7)
@@ -724,37 +999,57 @@ def register_memory_tools(
             items: List of item dicts.
             truncated: True if more items exist beyond the cap.
         """
-        from memctl.export_import import export_items
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
 
-        buf = io.StringIO()
-        count = export_items(
-            db_path,
-            tier=tier,
-            type_filter=type_filter,
-            scope=scope,
-            exclude_archived=not include_archived,
-            output=buf,
-            log=lambda msg: None,  # suppress stderr in MCP
-        )
+            from memctl.export_import import export_items
 
-        # Parse JSONL back to list of dicts
-        buf.seek(0)
-        items = []
-        for line in buf:
-            line = line.strip()
-            if line:
-                items.append(json.loads(line))
+            buf = io.StringIO()
+            count = export_items(
+                db_path,
+                tier=tier,
+                type_filter=type_filter,
+                scope=scope,
+                exclude_archived=not include_archived,
+                output=buf,
+                log=lambda msg: None,
+            )
 
-        truncated = len(items) > 1000
-        if truncated:
-            items = items[:1000]
+            buf.seek(0)
+            exported_items = []
+            for line in buf:
+                line = line.strip()
+                if line:
+                    exported_items.append(json.loads(line))
 
-        return {
-            "status": "ok",
-            "count": len(items),
-            "items": items,
-            "truncated": truncated,
-        }
+            truncated = len(exported_items) > 1000
+            if truncated:
+                exported_items = exported_items[:1000]
+
+            detail = {"exported": len(exported_items), "truncated": truncated}
+
+            return {
+                "status": "ok",
+                "count": len(exported_items),
+                "items": exported_items,
+                "truncated": truncated,
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Export failed: {e}"}
+        finally:
+            audit.log("memory_export", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     @mcp.tool()
     def memory_import(
@@ -777,31 +1072,53 @@ def register_memory_tools(
         Returns:
             total_lines, imported, skipped_dedup, skipped_policy, errors.
         """
-        from memctl.export_import import import_items
-
-        # Convert JSON array to JSONL for import_items()
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
-            item_list = json.loads(items)
-        except (json.JSONDecodeError, TypeError) as e:
-            return {"status": "error", "message": f"Invalid JSON: {e}"}
+            # Parse JSON first to get item count
+            try:
+                item_list = json.loads(items)
+            except (json.JSONDecodeError, TypeError) as e:
+                outcome = "error"
+                return {"status": "error", "message": f"Invalid JSON: {e}"}
 
-        if not isinstance(item_list, list):
-            item_list = [item_list]
+            if not isinstance(item_list, list):
+                item_list = [item_list]
 
-        # Build JSONL stream
-        jsonl_buf = io.StringIO()
-        for item_d in item_list:
-            jsonl_buf.write(json.dumps(item_d, ensure_ascii=False) + "\n")
-        jsonl_buf.seek(0)
+            # ③ Rate limiter: import counted as N writes
+            if rate_limiter:
+                rate_limiter.check_write_n(session_id, len(item_list))
 
-        try:
+            # ④a Guard: batch size + total bytes
+            guard.check_import_batch(len(item_list))
+            total_bytes = len(items.encode("utf-8"))
+            guard.check_write_budget(session_id, total_bytes)
+
+            from memctl.export_import import import_items
+
+            # Build JSONL stream
+            jsonl_buf = io.StringIO()
+            for item_d in item_list:
+                jsonl_buf.write(json.dumps(item_d, ensure_ascii=False) + "\n")
+            jsonl_buf.seek(0)
+
             result = import_items(
                 db_path,
                 jsonl_buf,
                 preserve_ids=preserve_ids,
                 dry_run=dry_run,
-                log=lambda msg: None,  # suppress stderr in MCP
+                log=lambda msg: None,
             )
+            detail = {
+                "items": result.total_lines,
+                "imported": result.imported,
+                "skipped": result.skipped_dedup + result.skipped_policy,
+                "errors": result.errors,
+                "bytes": total_bytes,
+            }
             return {
                 "status": "ok",
                 "total_lines": result.total_lines,
@@ -810,8 +1127,19 @@ def register_memory_tools(
                 "skipped_policy": result.skipped_policy,
                 "errors": result.errors,
             }
+
+        except GuardError as e:
+            outcome = "error"
+            return {"status": "error", "message": str(e)}
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Import failed: {e}"}
+        finally:
+            audit.log("memory_import", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # LOOP  (v0.7)
@@ -850,9 +1178,17 @@ def register_memory_tools(
         Returns:
             answer, iterations, converged, stop_reason, traces.
         """
-        from memctl.loop import run_loop
-
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
         try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            from memctl.loop import run_loop
+
             result = run_loop(
                 initial_context=initial_context,
                 query=query,
@@ -867,6 +1203,10 @@ def register_memory_tools(
                 timeout=timeout,
                 quiet=True,
             )
+            detail = {
+                "iterations": result.iterations,
+                "stop_reason": result.stop_reason,
+            }
             return {
                 "status": "ok",
                 "answer": result.answer,
@@ -875,15 +1215,25 @@ def register_memory_tools(
                 "stop_reason": result.stop_reason,
                 "traces": [t.to_dict() for t in result.traces],
             }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
         except ValueError as e:
+            outcome = "error"
             return {"status": "error", "message": f"Protocol error: {e}"}
         except RuntimeError as e:
+            outcome = "error"
             return {"status": "error", "message": f"LLM error: {e}"}
         except Exception as e:
+            outcome = "error"
             return {"status": "error", "message": f"Loop failed: {e}"}
+        finally:
+            audit.log("memory_loop", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 14 memory MCP tools")
+    logger.info("Registered 14 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------

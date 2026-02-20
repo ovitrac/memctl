@@ -3,6 +3,91 @@
 All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [0.8.0] — 2026-02-20
+
+### Added
+
+**Layer 0 — Path & Resource Guardrails (`mcp/guard.py`)**
+- `ServerGuard` class with strict path canonicalization
+- `--db-root` flag: constrains DB paths to a directory tree
+  - MCP serve mode: defaults to `~/.local/share/memctl/db` (secure-by-default)
+  - CLI mode: unset (backwards-compatible)
+- `--secure` flag: sets `--db-root=CWD` when not explicitly provided
+- Pre-check rejects `..` segments before path resolution
+- Symlink resolution and containment enforcement
+- Per-call write size cap (`--max-write-bytes`, default 64 KB)
+- Per-minute write budget (512 KB/min aggregate)
+- Import batch cap (500 items)
+- Root-relative path normalization for audit logs
+
+**Layer 1 — MCP Middleware**
+
+*Rate Limiter (`mcp/rate_limiter.py`):*
+- Token-bucket rate limiter, per-session, no threading (async single-threaded)
+- Write tools: 20/min (memory_write, memory_propose, memory_import, memory_consolidate, memory_sync)
+- Read tools: 120/min (memory_recall, memory_search, memory_read, memory_export, memory_inspect, memory_ask, memory_loop)
+- Exempt tools: memory_stats, memory_mount (health-check / metadata-only)
+- Burst factor ×2.0, configurable via `--writes-per-minute`, `--reads-per-minute`
+- Per-turn proposal cap (5/turn)
+- `--no-rate-limit` to disable entirely
+
+*Session Tracker (`mcp/session.py`):*
+- Minimal in-memory session state (no persistence)
+- Session ID from MCP context, fallback to `"default"` singleton
+- Turn count and per-turn write tracking
+
+*Audit Logger (`mcp/audit.py`):*
+- Structured JSONL audit trail (schema v1, stable contract)
+- Top-level fields: `v`, `ts`, `rid`, `tool`, `sid`, `db`, `outcome`, `d`, `ms`
+- `rid` (UUID4): correlates multi-tool sequences within one MCP request
+- Privacy rules: never logs raw content — only 120-char preview, SHA-256 hash, byte count
+- `d.policy`: records policy decision + rule ID for write tools
+- Fire-and-forget: audit failures never disrupt tool execution
+- Default: JSONL to stderr; `--audit-log PATH` for file output
+
+**Layer 3 — Optional Claude Code Integration Bundle**
+- `extras/claude-code/hooks/memctl_safety_guard.sh` — PreToolUse hook
+  - Blocks 13 dangerous shell commands + 4 git-destructive patterns
+- `extras/claude-code/hooks/memctl_audit_logger.sh` — PostToolUse hook
+  - Logs all tool actions to `.agent_logs/memctl_commands.log`
+- `scripts/install_claude_hooks.sh` — idempotent hooks installer
+- `scripts/uninstall_mcp.sh` — clean removal (MCP config + hooks)
+  - `--hooks-only` / `--mcp-only` for selective removal
+  - Timestamped `.bak` backups before any config edit
+  - Never deletes `.memory/` user data
+
+**Middleware Wiring**
+- Locked middleware execution order: guard → session → rate limit → execute → audit
+- All 14 MCP tools emit exactly one audit record per call (including failures)
+- `register_memory_tools()` accepts optional guard, rate_limiter, session_tracker, audit kwargs
+
+### Changed
+
+- `memctl serve` gains new flags: `--db-root`, `--secure`, `--no-rate-limit`,
+  `--writes-per-minute`, `--reads-per-minute`, `--burst-factor`,
+  `--max-proposals-per-turn`, `--max-write-bytes`, `--audit-log`
+- `mcp/server.py` wires all middleware into `create_server()`
+- `mcp/tools.py` rewritten with middleware integration (guard + rate limiter + audit)
+- CLI `cmd_serve()` passes through v0.8 flags to MCP server
+
+### Tests
+
+- 749 passed, 7 skipped, 0 failures (+97 new)
+- `test_guard.py`: 30 tests — path traversal, symlinks, size caps, import batch, no-root mode
+- `test_rate_limiter.py`: 33 tests — token bucket, burst, isolation, refill, batch import, proposals
+- `test_session.py`: 11 tests — fallback, turn tracking, write tracking, reset
+- `test_audit.py`: 16 tests — schema v1, privacy, fire-and-forget, JSONL format
+- `test_mcp_middleware.py`: 8 tests — audit emission, middleware order, policy bypass impossible
+
+### Design Decisions
+
+- Rate limits apply only in MCP mode (CLI remains unthrottled)
+- `memory_stats` exempt from rate limiting (health-check must always respond)
+- `memory_import` counted as N writes (one per item) + byte budget
+- Hooks are optional — not required for memctl core functionality
+- Audit schema v1 is a stable contract: fields may be added, never removed
+- Session tracking is in-memory only (no persistence, resets on server restart)
 Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---

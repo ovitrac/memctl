@@ -644,6 +644,42 @@ memctl serve --db ~/.local/share/memctl/memory.db
 python -m memctl.mcp.server --db ~/.local/share/memctl/memory.db
 ```
 
+### Defense in Depth (v0.8)
+
+The MCP server applies four layers of protection:
+
+| Layer | Component | Purpose |
+|-------|-----------|---------|
+| **L0** | `ServerGuard` | Path validation (`--db-root`), write size caps, import batch limits |
+| **L1** | `RateLimiter` | Token-bucket throttling: 20 writes/min, 120 reads/min per session |
+| **L1** | `SessionTracker` | In-memory session state, per-turn write tracking |
+| **L1** | `AuditLogger` | Structured JSONL audit trail (schema v1, `rid` correlation) |
+| **L2** | `MemoryPolicy` | 35 detection patterns (secrets, injection, instructional, PII) |
+| **L3** | Claude Code hooks | Optional: PreToolUse safety guard + PostToolUse audit logger |
+
+**Secure server example:**
+
+```bash
+# Default: db-root enforced, rate limits on, audit to stderr
+memctl serve --db project/memory.db
+
+# Explicit secure mode with audit file
+memctl serve --db memory.db --db-root . --audit-log audit.jsonl
+
+# Disable rate limits (development only)
+memctl serve --db memory.db --no-rate-limit
+```
+
+**Claude Code hooks** (optional, separate from core):
+
+```bash
+# Install safety guard + audit logger hooks
+./scripts/install_claude_hooks.sh
+
+# Uninstall
+./scripts/uninstall_mcp.sh --hooks-only
+```
+
 ### MCP Tools
 
 | Tool | Description | Since |
