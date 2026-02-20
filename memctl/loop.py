@@ -365,24 +365,47 @@ def merge_context(
 # ---------------------------------------------------------------------------
 
 
-def recall_items(db_path: str, query: str, limit: int = 50) -> list[dict]:
+def recall_items(
+    db_path: str,
+    query: str,
+    limit: int = 50,
+    *,
+    mount_id: Optional[str] = None,
+) -> list[dict]:
     """Perform FTS5 recall from the memory store.
 
     Args:
         db_path: Path to the SQLite database.
         query: Search query string.
         limit: Max results.
+        mount_id: If set, restrict recall to items belonging to this mount
+            (via corpus_hashes item_ids). None = all items.
 
     Returns:
         List of item dicts with id, title, content, tier, tags, confidence.
     """
+    import json as _json
     from memctl.store import MemoryStore
 
     store = MemoryStore(db_path=db_path)
     try:
+        # Build allowed item ID set for scoped recall
+        allowed_ids: Optional[set[str]] = None
+        if mount_id is not None:
+            corpus_files = store.list_corpus_files(mount_id=mount_id)
+            allowed_ids = set()
+            for cf in corpus_files:
+                ids = cf.get("item_ids", [])
+                if isinstance(ids, str):
+                    ids = _json.loads(ids)
+                allowed_ids.update(ids)
+
         items = store.search_fulltext(query, limit=limit)
-        # Filter non-injectable items
-        items = [it for it in items if it.injectable]
+        # Filter non-injectable items (and scope to mount if requested)
+        items = [
+            it for it in items
+            if it.injectable and (allowed_ids is None or it.id in allowed_ids)
+        ]
         return [
             {
                 "id": it.id,

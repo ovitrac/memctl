@@ -61,7 +61,7 @@ PDF extraction requires `pdftotext` from poppler-utils (`sudo apt install popple
 
 ```bash
 memctl init
-# Creates .memory/memory.db, .memory/config.yaml, .memory/.gitignore
+# Creates .memory/memory.db, .memory/config.json, .memory/.gitignore
 ```
 
 Set the environment variable for convenience:
@@ -122,7 +122,22 @@ memctl inspect docs/ --no-sync
 
 `inspect` auto-mounts the folder if needed, checks staleness, syncs only if stale, and produces a structural summary. All implicit actions are announced on stderr.
 
-### 6. Chat with memory-backed context
+### 6. Ask a question about a folder
+
+```bash
+# One-shot: auto-mount, auto-sync, inspect + recall → LLM → answer
+memctl ask docs/ "What authentication risks exist?" --llm "claude -p"
+
+# With Ollama
+memctl ask src/ "What is under-documented?" --llm "ollama run granite3.1:2b"
+
+# JSON output with metadata
+memctl ask docs/ "Summarize the architecture" --llm "claude -p" --json
+```
+
+`ask` combines mount, sync, structural inspection, and scoped recall into a single command. The LLM receives both the folder structure and content context.
+
+### 7. Chat with memory-backed context
 
 ```bash
 # Interactive chat with any LLM
@@ -134,7 +149,7 @@ memctl chat --llm "ollama run granite3.1:2b" --source docs/ --store --session
 
 Each question recalls from the memory store, sends context + question to the LLM, and displays the answer. `--session` keeps a sliding window of recent Q&A pairs. `--store` persists answers as STM items.
 
-### 7. Manage
+### 8. Manage
 
 ```bash
 memctl show MEM-abc123def456     # Show item details
@@ -167,7 +182,10 @@ memctl <command> [options]
 | `mount PATH` | Register a folder as a structured source |
 | `sync [PATH]` | Delta-sync mounted folders into the store |
 | `inspect [PATH]` | Structural inspection with auto-mount and auto-sync |
+| `ask PATH "Q" --llm CMD` | One-shot folder Q&A (inspect + scoped recall + loop) |
 | `chat --llm CMD` | Interactive memory-backed chat REPL |
+| `export [--tier T]` | Export memory items as JSONL to stdout |
+| `import [FILE]` | Import memory items from JSONL file or stdin |
 | `serve` | Start MCP server (requires `memctl[mcp]`) |
 
 ### Global Flags
@@ -175,6 +193,7 @@ memctl <command> [options]
 | Flag | Description |
 |------|-------------|
 | `--db PATH` | SQLite database path |
+| `--config PATH` | Path to `config.json` (auto-detected beside database) |
 | `--json` | Machine-readable JSON output |
 | `-q, --quiet` | Suppress stderr progress messages |
 | `-v, --verbose` | Enable debug logging |
@@ -187,7 +206,7 @@ memctl <command> [options]
 memctl init [PATH] [--force] [--fts-tokenizer fr|en|raw]
 ```
 
-Creates the workspace directory, SQLite database with schema, `config.yaml`, and `.gitignore`. Prints `export MEMCTL_DB="..."` to stdout for eval.
+Creates the workspace directory, SQLite database with schema, `config.json`, and `.gitignore`. Prints `export MEMCTL_DB="..."` to stdout for eval.
 
 Idempotent: running twice on the same path exits 0 without error.
 
@@ -325,14 +344,40 @@ Output includes file/chunk/size totals, per-folder breakdown, per-extension dist
 
 All implicit actions (mount, sync) are announced on stderr. `--quiet` suppresses them.
 
+#### `memctl ask`
+
+```bash
+memctl ask PATH "question" --llm CMD [--inspect-cap N] [--budget N]
+           [--sync auto|always|never] [--no-sync] [--mount-mode persist|ephemeral]
+           [--protocol passive|json|regex] [--max-calls N] [--json] [--quiet]
+```
+
+One-shot folder Q&A. Orchestrates auto-mount, auto-sync, structural inspection, scoped recall, and bounded loop — all in one command.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--llm CMD` | *(required)* | LLM command (e.g. `"claude -p"`) |
+| `--inspect-cap` | `600` | Tokens reserved for structural context |
+| `--budget` | `2200` | Total token budget (inspect + recall) |
+| `--sync` | `auto` | Sync mode: `auto`, `always`, `never` |
+| `--no-sync` | off | Skip sync (shorthand for `--sync never`) |
+| `--mount-mode` | `persist` | Keep mount (`persist`) or remove after (`ephemeral`) |
+| `--protocol` | `passive` | LLM output protocol |
+| `--max-calls` | `1` | Max loop iterations |
+
+**Budget splitting:** `--inspect-cap` tokens go to structural context (folder tree, observations). The remainder (`--budget` minus `--inspect-cap`) goes to content recall (FTS5 results scoped to the folder).
+
+**Scoped recall:** FTS results are post-filtered to include only items from the target folder's mount. Items from other mounts are excluded.
+
 #### `memctl chat`
 
 ```bash
-memctl chat --llm CMD [--session] [--store] [--protocol passive|json|regex]
-            [--max-calls N] [--budget N] [--source FILE ...] [--quiet]
+memctl chat --llm CMD [--session] [--store] [--folder PATH]
+            [--protocol passive|json|regex] [--max-calls N] [--budget N]
+            [--source FILE ...] [--quiet]
 ```
 
-Interactive memory-backed chat REPL. Each turn: FTS5 recall from the memory store, send context + question to the LLM, display the answer.
+Interactive memory-backed chat REPL. Each turn: FTS5 recall from the memory store, send context + question to the LLM, display the answer. Persistent readline history (`~/.local/share/memctl/chat_history`) and multi-line input (blank line to send).
 
 **Stateless by default.** Each question sees only the memory store — no hidden conversation state.
 
@@ -346,9 +391,79 @@ Interactive memory-backed chat REPL. Each turn: FTS5 recall from the memory stor
 | `--session-budget` | `4000` | Session block character limit |
 | `--store` | off | Persist each answer as STM item |
 | `--source FILE...` | *(none)* | Pre-ingest files before starting |
+| `--folder PATH` | *(none)* | Scope recall to a folder (auto-mount/sync) |
 | `--tags` | `chat` | Tags for stored items (comma-separated) |
 
+**Folder-scoped chat:** `--folder PATH` auto-mounts and syncs the folder, then restricts every turn's recall to that folder's items. Combines the convenience of `ask` with the interactivity of `chat`.
+
 **stdout purity:** answers go to stdout only. Prompt, banner, and hints go to stderr.
+
+#### `memctl export`
+
+```bash
+memctl export [--tier T] [--type T] [--scope S] [--include-archived]
+```
+
+Exports memory items as JSONL (one JSON object per line) to stdout. Each line is a complete `MemoryItem.to_dict()` serialization including full provenance.
+
+```bash
+# Export all items
+memctl export > backup.jsonl
+
+# Export only LTM decisions
+memctl export --tier ltm --type decision > decisions.jsonl
+
+# Pipe between databases
+memctl export --db project-a.db | memctl import --db project-b.db
+```
+
+**stdout purity:** only JSONL data goes to stdout. Progress goes to stderr.
+
+#### `memctl import`
+
+```bash
+memctl import [FILE] [--preserve-ids] [--dry-run]
+```
+
+Imports memory items from a JSONL file or stdin. Every item passes through the policy engine. Content-hash deduplication prevents duplicates.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `FILE` | stdin | JSONL file to import |
+| `--preserve-ids` | off | Keep original item IDs (default: generate new IDs) |
+| `--dry-run` | off | Count items without writing |
+
+```bash
+# Import from file
+memctl import backup.jsonl --db fresh.db
+
+# Dry run — see what would happen
+memctl import backup.jsonl --dry-run
+
+# Preserve original IDs (for controlled migration)
+memctl import backup.jsonl --preserve-ids --db replica.db
+```
+
+---
+
+## Configuration
+
+memctl reads an optional `config.json` file from beside the database (auto-detected) or from an explicit `--config PATH` flag.
+
+```json
+{
+  "store": {"fts_tokenizer": "fr"},
+  "inspect": {
+    "dominance_frac": 0.40,
+    "low_density_threshold": 0.10,
+    "ext_concentration_frac": 0.75,
+    "sparse_threshold": 1
+  },
+  "chat": {"history_max": 1000}
+}
+```
+
+**Precedence:** `CLI --flag` > `MEMCTL_*` env var > `config.json` > compiled default. Missing or invalid config file is silently ignored.
 
 ---
 
@@ -362,7 +477,7 @@ Interactive memory-backed chat REPL. Each turn: FTS5 recall from the memory stor
 | `MEMCTL_TIER` | `stm` | Default write tier |
 | `MEMCTL_SESSION` | *(unset)* | Session ID for audit provenance |
 
-**Precedence:** `CLI --flag` > `MEMCTL_*` env var > compiled default. Always.
+**Precedence:** `CLI --flag` > `MEMCTL_*` env var > `config.json` > compiled default. Always.
 
 ---
 
@@ -402,8 +517,20 @@ memctl search "auth" --json | jq '.[].title'
 # Batch ingest a directory
 memctl push "project overview" --source src/ tests/ docs/ -q
 
-# Export all items as JSONL
-memctl search "" --json | jq -c '.[]'
+# Export all items as JSONL backup
+memctl export > backup.jsonl
+
+# Export only LTM items
+memctl export --tier ltm > decisions.jsonl
+
+# Import into a fresh database
+memctl import backup.jsonl --db fresh.db
+
+# Pipe between databases
+memctl export --db project-a.db | memctl import --db project-b.db
+
+# Dry-run import to check counts
+memctl import backup.jsonl --dry-run
 
 # Iterative recall-answer loop with trace
 memctl push "auth flow" --source docs/ | memctl loop "auth flow" --llm "claude -p" --trace
@@ -416,6 +543,15 @@ memctl inspect src/ --json | jq '.extensions'
 
 # Inspect without syncing (use cached state)
 memctl inspect docs/ --no-sync --json
+
+# One-shot folder Q&A (inspect + scoped recall + LLM)
+memctl ask docs/ "What are the auth risks?" --llm "claude -p"
+
+# Folder Q&A with JSON output
+memctl ask src/ "Summarize the architecture" --llm "claude -p" --json
+
+# Interactive folder-scoped chat
+memctl chat --llm "claude -p" --folder docs/ --session --store
 
 # Interactive chat with pre-ingested docs
 memctl chat --llm "claude -p" --source docs/ --session --store
@@ -477,14 +613,16 @@ memctl/
 ├── extract.py         Text extraction (text files + binary format dispatch)
 ├── ingest.py          Paragraph chunking, SHA-256 dedup, source resolution
 ├── policy.py          Write governance (30 patterns: secrets, injection, instructional)
-├── config.py          Dataclass configuration
+├── config.py          Dataclass configuration + JSON config loading
 ├── similarity.py      Stdlib text similarity (Jaccard + SequenceMatcher)
 ├── loop.py            Bounded recall-answer loop controller
 ├── mount.py           Folder mount registration and management
 ├── sync.py            Delta sync with 3-tier change detection
 ├── inspect.py         Structural inspection and orchestration
-├── chat.py            Interactive memory-backed chat REPL
-├── cli.py             13 CLI commands
+├── chat.py            Interactive chat REPL (readline history, multi-line)
+├── ask.py             One-shot folder Q&A orchestrator
+├── export_import.py   JSONL export/import with policy enforcement
+├── cli.py             16 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex)
 └── mcp/
@@ -493,7 +631,7 @@ memctl/
     └── server.py      FastMCP server entry point
 ```
 
-20 source files. ~7,700 lines. Zero compiled dependencies for core.
+22 source files. ~8,500 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -652,7 +790,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-492 tests across 15 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, chat, forward compatibility, contracts, CLI (subprocess), and pipe composition.
+544 tests across 18 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), and pipe composition.
 
 ---
 

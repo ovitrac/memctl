@@ -1,5 +1,5 @@
 """
-Tests for memctl CLI — all 13 commands via subprocess.
+Tests for memctl CLI — all 16 commands via subprocess.
 
 Every test exercises the real binary (`python -m memctl.cli`) against a
 temporary SQLite database so there are no side-effects on the developer
@@ -771,3 +771,109 @@ class TestChatCLI:
         # The key test: exit code 0 and non-empty stdout
         assert r.returncode == 0
         assert len(r.stdout.strip()) > 0
+
+
+# ===========================================================================
+# TestAskCLI
+# ===========================================================================
+
+
+class TestAskCLI:
+    """Subprocess tests for `memctl ask`."""
+
+    def test_ask_help(self):
+        """ask --help shows expected flags."""
+        r = run(["ask", "--help"])
+        assert r.returncode == 0
+        for flag in ["--llm", "--inspect-cap", "--sync", "--mount-mode",
+                      "--protocol", "--budget"]:
+            assert flag in r.stdout, f"Missing flag {flag} in help output"
+        # Positional args documented
+        assert "path" in r.stdout
+        assert "question" in r.stdout
+
+    def test_ask_basic(self, tmp_path):
+        """ask with cat LLM produces non-empty answer."""
+        # Create a mini corpus
+        corpus = tmp_path / "docs"
+        corpus.mkdir()
+        (corpus / "test.md").write_text("# Test\n\nThis is a test document.\n")
+        db = str(tmp_path / "test.db")
+
+        r = subprocess.run(
+            CLI + ["ask", str(corpus), "What is this?",
+                   "--llm", "cat", "--protocol", "passive",
+                   "--db", db, "-q"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert r.returncode == 0
+        assert len(r.stdout.strip()) > 0
+
+
+class TestExportImportCLI:
+    """Subprocess tests for `memctl export` and `memctl import`."""
+
+    def test_export_help(self):
+        """export --help shows expected flags."""
+        r = run(["export", "--help"])
+        assert r.returncode == 0
+        for flag in ["--tier", "--type", "--include-archived"]:
+            assert flag in r.stdout, f"Missing flag {flag} in help output"
+
+    def test_import_help(self):
+        """import --help shows expected flags."""
+        r = run(["import", "--help"])
+        assert r.returncode == 0
+        for flag in ["--preserve-ids", "--dry-run"]:
+            assert flag in r.stdout, f"Missing flag {flag} in help output"
+
+    def test_roundtrip(self, populated_db, tmp_path):
+        """Export from populated DB, import into fresh DB, verify item count."""
+        # Export
+        r = run(["export", "--db", populated_db, "-q"])
+        assert r.returncode == 0
+        lines = [l for l in r.stdout.strip().split("\n") if l.strip()]
+        assert len(lines) >= 1
+
+        # Write to file
+        export_file = str(tmp_path / "backup.jsonl")
+        with open(export_file, "w") as f:
+            f.write(r.stdout)
+
+        # Import into fresh DB
+        fresh_db = str(tmp_path / "fresh" / "memory.db")
+        run(["init", str(tmp_path / "fresh"), "--db", fresh_db, "-q"])
+        r2 = run(["import", export_file, "--db", fresh_db, "-q"])
+        assert r2.returncode == 0
+
+        # Verify items exist
+        r3 = run(["stats", "--db", fresh_db, "--json"])
+        assert r3.returncode == 0
+        stats = json.loads(r3.stdout)
+        assert stats["total_items"] >= 1
+
+    def test_export_empty_db(self, db):
+        """Export from empty DB produces no JSONL lines."""
+        r = run(["export", "--db", db, "-q"])
+        assert r.returncode == 0
+        # stdout should be empty (no items)
+        assert r.stdout.strip() == ""
+
+
+class TestInitConfigJSON:
+    """Tests for JSON config in init command."""
+
+    def test_init_creates_config_json(self, tmp_path):
+        """memctl init creates config.json (not config.yaml)."""
+        target = str(tmp_path / "workspace")
+        r = run(["init", target, "-q"])
+        assert r.returncode == 0
+
+        config_path = tmp_path / "workspace" / "config.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert "store" in data
+        assert "inspect" in data
+        assert "chat" in data

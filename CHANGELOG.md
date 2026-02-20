@@ -7,6 +7,55 @@ Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---
 
+## [0.6.0] - 2026-02-20
+
+Operability and polish: export/import, chat UX hardening, config file support.
+
+### Added
+
+- **JSONL export/import** (`export_import.py`): Backup, migrate, and share memory databases via JSONL. `memctl export` writes one JSON object per line to stdout (filters: `--tier`, `--type`, `--scope`, `--include-archived`). `memctl import [FILE]` reads JSONL from file or stdin with content-hash dedup and policy enforcement. Options: `--preserve-ids`, `--dry-run`.
+- **Persistent readline history**: Chat REPL saves command history to `~/.local/share/memctl/chat_history` (XDG_DATA_HOME compliant). Loaded on startup, saved on exit. Max 1000 entries (configurable via `config.json`). Disabled for non-TTY input.
+- **Multi-line chat input**: Blank line terminates multi-line input in interactive mode. Continuation prompt (`  `) on stderr. Piped mode unchanged (one line per question). Banner announces convention.
+- **JSON config file** (`config.py`): `load_config()` reads `config.json` from beside the database. Silent fallback to compiled defaults if missing or invalid. Sections: `store`, `inspect`, `chat`. Precedence: CLI > env > config > default.
+- **Configurable observation thresholds**: `inspect.py` reads thresholds from `config.json` `inspect` section. Custom `dominance_frac`, `low_density_threshold`, `ext_concentration_frac`, `sparse_threshold`. Hardcoded defaults unchanged.
+- **Test suite** expanded to 544 tests across 18 files (+35 tests: 16 export/import, 8 config, 7 chat, 5 CLI).
+
+### Changed
+
+- **`memctl init`** now creates `config.json` (not `config.yaml`). If legacy `config.yaml` exists, a migration hint is printed to stderr.
+- **CLI `--config PATH`** flag available on all subcommands for explicit config override.
+- **CLI: 16 commands** (was 14). New: `export`, `import`.
+
+### Design Decisions
+
+- **JSON over YAML**: Zero dependencies. `json.load()` is stdlib. No `pyyaml` or hand-rolled parser. Python 3.10+ compatible (no `tomllib` which requires 3.11+).
+- **New IDs by default on import**: Avoids collision across databases. `--preserve-ids` for controlled migrations.
+- **Items-only export**: `corpus_hashes`, `mounts`, `events`, `links` are machine-local. Items are the portable unit.
+- **Policy never bypassed**: Every imported item passes through `policy.evaluate_item()`.
+
+---
+
+## [0.5.0] - 2026-02-20
+
+One-shot folder Q&A and scoped recall.
+
+### Added
+
+- **Folder Q&A** (`ask.py`): Answer a question about a folder in one command with `memctl ask <path> "question" --llm CMD`. Orchestrates auto-mount, auto-sync, structural inspect, scoped recall, and bounded loop. Answer to stdout, progress to stderr. Options: `--inspect-cap` (tokens for structural context, default 600), `--sync auto|always|never`, `--mount-mode persist|ephemeral`, `--protocol`, `--max-calls`, `--budget`.
+- **Scoped recall**: `recall_items()` accepts `mount_id` parameter. When set, FTS results are post-filtered to items belonging to that mount (via `corpus_hashes` item_ids). Unscoped recall is unchanged.
+- **Chat `--folder`**: `memctl chat --folder <path>` scopes every turn's recall to the folder. Auto-mounts and syncs on startup. Same flags as `ask` for sync control (`--sync`, `--no-sync`).
+- **Budget splitting**: `--inspect-cap` knob controls how much of `--budget` is reserved for structural context (inspect block). Remainder goes to recall. Deterministic, no rollover.
+- **Test suite** expanded to 509 tests across 16 files (+17 tests: 15 ask unit, 2 CLI ask).
+
+### Design Decisions
+
+- **One-shot only**: `ask` is strictly one-shot (no REPL). For interactive folder-scoped sessions, use `memctl chat --folder`.
+- **Post-filter scoping**: Scoped recall uses post-filter on FTS results (not SQL JOIN) because FTS5 MATCH doesn't compose well with JOINs. O(N) where N = FTS limit.
+- **Ephemeral ordering**: When `--mount-mode ephemeral`, mount is kept during recall and loop, then removed after the answer is computed.
+- **CLI: 14 commands** (was 13). New: `ask`.
+
+---
+
 ## [0.4.0] - 2026-02-20
 
 Interactive memory-backed chat REPL.
