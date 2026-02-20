@@ -107,7 +107,22 @@ memctl search "authentication"
 memctl search "database" --json -k 5
 ```
 
-### 5. Inspect and manage
+### 5. Inspect a folder (one-liner)
+
+```bash
+# Auto-mounts, auto-syncs, and inspects — all in one command
+memctl inspect docs/
+
+# Same in JSON (for scripts)
+memctl inspect docs/ --json
+
+# Skip sync (use cached state)
+memctl inspect docs/ --no-sync
+```
+
+`inspect` auto-mounts the folder if needed, checks staleness, syncs only if stale, and produces a structural summary. All implicit actions are announced on stderr.
+
+### 6. Manage
 
 ```bash
 memctl show MEM-abc123def456     # Show item details
@@ -137,6 +152,9 @@ memctl <command> [options]
 | `stats` | Store statistics |
 | `consolidate [--dry-run]` | Deterministic merge of similar STM items |
 | `loop QUERY --llm CMD` | Bounded recall-answer loop with LLM |
+| `mount PATH` | Register a folder as a structured source |
+| `sync [PATH]` | Delta-sync mounted folders into the store |
+| `inspect [PATH]` | Structural inspection with auto-mount and auto-sync |
 | `serve` | Start MCP server (requires `memctl[mcp]`) |
 
 ### Global Flags
@@ -248,6 +266,52 @@ memctl push "database schema" --source src/ \
 memctl loop --replay trace.jsonl "original question"
 ```
 
+#### `memctl mount`
+
+```bash
+memctl mount PATH [--name NAME] [--ignore PATTERN ...] [--lang HINT]
+memctl mount --list
+memctl mount --remove ID_OR_NAME
+```
+
+Registers a folder as a structured source. Stores metadata only — no scanning, no ingestion. The folder contents are synced separately via `sync` or automatically via `inspect`.
+
+#### `memctl sync`
+
+```bash
+memctl sync [PATH] [--full] [--json] [--quiet]
+```
+
+Delta-syncs mounted folders into the memory store. Uses a 3-tier delta rule:
+1. **New file** (not in DB) → ingest
+2. **Size + mtime match** → fast skip (no hashing)
+3. **Hash compare** → ingest only if content changed
+
+If `PATH` is given but not yet mounted, it is auto-registered first. `--full` forces re-processing of all files.
+
+#### `memctl inspect`
+
+```bash
+# Orchestration mode — auto-mounts, auto-syncs, and inspects
+memctl inspect PATH [--sync auto|always|never] [--no-sync] [--mount-mode persist|ephemeral]
+                    [--budget N] [--ignore PATTERN ...] [--json] [--quiet]
+
+# Classic mode — inspect an existing mount by ID/name
+memctl inspect --mount ID_OR_NAME [--budget N] [--json] [--quiet]
+```
+
+When given a positional `PATH`, inspect operates in **orchestration mode**:
+1. **Auto-mount** — registers the folder if not already mounted
+2. **Staleness check** — compares disk inventory (path/size/mtime triples) against the store
+3. **Auto-sync** — runs delta sync only if stale (or always/never per `--sync`)
+4. **Inspect** — generates a deterministic structural summary
+
+Output includes file/chunk/size totals, per-folder breakdown, per-extension distribution, top-5 largest files, and rule-based observations. All paths in output are mount-relative (never absolute).
+
+`--mount-mode ephemeral` removes the mount record after inspection (corpus data is preserved). `--no-sync` is shorthand for `--sync never`.
+
+All implicit actions (mount, sync) are announced on stderr. `--quiet` suppresses them.
+
 ---
 
 ## Environment Variables
@@ -305,6 +369,15 @@ memctl search "" --json | jq -c '.[]'
 
 # Iterative recall-answer loop with trace
 memctl push "auth flow" --source docs/ | memctl loop "auth flow" --llm "claude -p" --trace
+
+# One-liner: inspect a folder (auto-mount + auto-sync)
+memctl inspect docs/
+
+# Inspect in JSON, pipe to jq for extension breakdown
+memctl inspect src/ --json | jq '.extensions'
+
+# Inspect without syncing (use cached state)
+memctl inspect docs/ --no-sync --json
 ```
 
 ---
@@ -359,14 +432,17 @@ Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 ```
 memctl/
 ├── types.py           Data model (MemoryItem, MemoryProposal, MemoryEvent, MemoryLink)
-├── store.py           SQLite + FTS5 + WAL backend (9 tables + schema_meta)
+├── store.py           SQLite + FTS5 + WAL backend (10 tables + schema_meta)
 ├── extract.py         Text extraction (text files + binary format dispatch)
 ├── ingest.py          Paragraph chunking, SHA-256 dedup, source resolution
 ├── policy.py          Write governance (30 patterns: secrets, injection, instructional)
 ├── config.py          Dataclass configuration
 ├── similarity.py      Stdlib text similarity (Jaccard + SequenceMatcher)
 ├── loop.py            Bounded recall-answer loop controller
-├── cli.py             9 CLI commands
+├── mount.py           Folder mount registration and management
+├── sync.py            Delta sync with 3-tier change detection
+├── inspect.py         Structural inspection and orchestration
+├── cli.py             12 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex)
 └── mcp/
@@ -375,7 +451,7 @@ memctl/
     └── server.py      FastMCP server entry point
 ```
 
-16 source files. ~5,300 lines. Zero compiled dependencies for core.
+19 source files. ~7,300 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -442,7 +518,7 @@ Deterministic, no-LLM merge pipeline:
 
 ## Database Schema
 
-Single SQLite file with WAL mode. 9 tables + 1 FTS5 virtual table:
+Single SQLite file with WAL mode. 10 tables + 1 FTS5 virtual table:
 
 | Table | Purpose |
 |-------|---------|
@@ -451,13 +527,14 @@ Single SQLite file with WAL mode. 9 tables + 1 FTS5 virtual table:
 | `memory_events` | Audit log (every read/write/consolidate) |
 | `memory_links` | Directional relationships (supersedes, supports, etc.) |
 | `memory_embeddings` | Reserved for RAGIX (empty in memctl) |
-| `corpus_hashes` | SHA-256 file dedup registry |
+| `corpus_hashes` | SHA-256 file dedup + mount metadata (mount_id, rel_path, ext, size_bytes, mtime_epoch, lang_hint) |
 | `corpus_metadata` | Corpus-level metadata |
 | `schema_meta` | Schema version, creation info |
 | `memory_palace_locations` | Reserved for RAGIX |
+| `memory_mounts` | Registered folder mounts (path, name, ignore patterns, lang hint) |
 | `memory_items_fts` | FTS5 virtual table for full-text search |
 
-Schema version is tracked in `schema_meta`. Current: `SCHEMA_VERSION=1`.
+Schema version is tracked in `schema_meta`. Current: `SCHEMA_VERSION=2`. Migration from v1 is additive (ALTER TABLE ADD COLUMN) and idempotent.
 
 ---
 
@@ -475,10 +552,11 @@ ragix memory stats --db /path/to/your/.memory/memory.db
 
 | Feature | memctl | RAGIX |
 |---------|--------|-------|
-| SQLite schema | Identical | Identical |
+| SQLite schema | Forward-compatible (RAGIX can open memctl DBs) | Superset |
 | Injection format | `format_version=1` | `format_version=1` |
 | MCP tool names | `memory_*` | `memory_*` |
 | FTS5 recall | Yes | Yes (+ hybrid embeddings) |
+| Folder mount + sync | Yes (v0.3+) | No |
 | Embeddings | No | Yes (FAISS + Ollama) |
 | LLM-assisted merge | No | Yes |
 | Graph-RAG | No | Yes |
@@ -532,7 +610,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-332 tests covering types, store, policy, ingest, text extraction, similarity, loop controller, forward compatibility, contracts, CLI (subprocess), and pipe composition.
+479 tests across 14 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, forward compatibility, contracts, CLI (subprocess), and pipe composition.
 
 ---
 

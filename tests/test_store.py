@@ -62,7 +62,7 @@ class TestSchema:
         }
         required = {
             "memory_items", "memory_revisions", "memory_events",
-            "memory_links", "memory_embeddings",
+            "memory_links", "memory_embeddings", "memory_mounts",
             "corpus_hashes", "corpus_metadata", "schema_meta",
         }
         assert required.issubset(tables), f"Missing: {required - tables}"
@@ -409,3 +409,179 @@ class TestDiskPersistence:
         mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
         assert mode == "wal"
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# v0.3: Mount CRUD + extended corpus_hashes
+# ---------------------------------------------------------------------------
+
+
+class TestMountCRUD:
+    def test_write_mount(self, store):
+        mid = store.write_mount("/tmp/test_docs")
+        assert mid.startswith("MNT-")
+
+    def test_write_mount_idempotent(self, store):
+        mid1 = store.write_mount("/tmp/test_docs")
+        mid2 = store.write_mount("/tmp/test_docs")
+        assert mid1 == mid2
+
+    def test_write_mount_with_options(self, store):
+        mid = store.write_mount(
+            "/tmp/docs",
+            name="docs",
+            ignore_patterns=["*.log"],
+            lang_hint="fr",
+        )
+        m = store.read_mount(mid)
+        assert m is not None
+        assert m["name"] == "docs"
+        assert m["ignore_patterns"] == ["*.log"]
+        assert m["lang_hint"] == "fr"
+
+    def test_read_mount_by_path(self, store):
+        store.write_mount("/tmp/docs", name="docs")
+        m = store.read_mount("/tmp/docs")
+        assert m is not None
+        assert m["name"] == "docs"
+
+    def test_read_mount_not_found(self, store):
+        assert store.read_mount("nonexistent") is None
+
+    def test_list_mounts_empty(self, store):
+        assert store.list_mounts() == []
+
+    def test_list_mounts(self, store):
+        store.write_mount("/tmp/a", name="a")
+        store.write_mount("/tmp/b", name="b")
+        mounts = store.list_mounts()
+        assert len(mounts) == 2
+        names = {m["name"] for m in mounts}
+        assert names == {"a", "b"}
+
+    def test_remove_mount(self, store):
+        mid = store.write_mount("/tmp/docs", name="docs")
+        assert store.remove_mount(mid) is True
+        assert store.list_mounts() == []
+
+    def test_remove_mount_by_name(self, store):
+        store.write_mount("/tmp/docs", name="docs")
+        assert store.remove_mount("docs") is True
+        assert store.list_mounts() == []
+
+    def test_remove_mount_not_found(self, store):
+        assert store.remove_mount("nonexistent") is False
+
+    def test_update_mount_sync_time(self, store):
+        mid = store.write_mount("/tmp/docs")
+        m1 = store.read_mount(mid)
+        assert m1["last_sync_at"] is None
+        store.update_mount_sync_time(mid)
+        m2 = store.read_mount(mid)
+        assert m2["last_sync_at"] is not None
+
+
+class TestCorpusHashExtended:
+    def test_write_with_mount_metadata(self, store):
+        store.write_corpus_hash(
+            "/tmp/docs/file.md", "abc123",
+            chunk_count=3, item_ids=["MEM-1", "MEM-2"],
+            mount_id="MNT-test", rel_path="file.md",
+            ext=".md", size_bytes=1024, mtime_epoch=1700000000,
+            lang_hint="en",
+        )
+        h = store.read_corpus_hash("/tmp/docs/file.md")
+        assert h is not None
+        assert h["mount_id"] == "MNT-test"
+        assert h["rel_path"] == "file.md"
+        assert h["ext"] == ".md"
+        assert h["size_bytes"] == 1024
+        assert h["mtime_epoch"] == 1700000000
+        assert h["lang_hint"] == "en"
+
+    def test_backward_compat_no_mount_fields(self, store):
+        """Existing callers (no mount metadata) still work."""
+        store.write_corpus_hash("/tmp/file.md", "abc123", 2, ["MEM-1"])
+        h = store.read_corpus_hash("/tmp/file.md")
+        assert h["sha256"] == "abc123"
+        assert h["mount_id"] is None
+        assert h["rel_path"] is None
+
+    def test_list_corpus_files(self, store):
+        store.write_corpus_hash(
+            "/a.md", "h1", mount_id="MNT-1", rel_path="a.md", ext=".md",
+        )
+        store.write_corpus_hash(
+            "/b.py", "h2", mount_id="MNT-1", rel_path="b.py", ext=".py",
+        )
+        store.write_corpus_hash(
+            "/c.md", "h3", mount_id="MNT-2", rel_path="c.md", ext=".md",
+        )
+        # All files
+        all_files = store.list_corpus_files()
+        assert len(all_files) == 3
+        # Filtered by mount
+        m1_files = store.list_corpus_files(mount_id="MNT-1")
+        assert len(m1_files) == 2
+        m2_files = store.list_corpus_files(mount_id="MNT-2")
+        assert len(m2_files) == 1
+
+
+class TestMigration:
+    def test_v1_to_v2_migration(self, tmp_path):
+        """Simulate a v1 database (no mount columns) opening with v2 code."""
+        db_path = str(tmp_path / "v1.db")
+        # Create a minimal v1 schema manually
+        conn = sqlite3.connect(db_path)
+        conn.execute("""CREATE TABLE IF NOT EXISTS corpus_hashes (
+            file_path TEXT PRIMARY KEY,
+            sha256 TEXT NOT NULL,
+            chunk_count INTEGER NOT NULL DEFAULT 0,
+            item_ids TEXT NOT NULL DEFAULT '[]',
+            ingested_at TEXT NOT NULL
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS schema_meta (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL
+        )""")
+        conn.execute("INSERT INTO schema_meta VALUES ('schema_version', '1')")
+        conn.execute("""INSERT INTO corpus_hashes VALUES (
+            '/old/file.md', 'oldhash', 2, '["MEM-old"]', '2026-01-01T00:00:00Z'
+        )""")
+        conn.commit()
+        conn.close()
+
+        # Open with v2 code — migration should add new columns
+        store = MemoryStore(db_path=db_path)
+
+        # Old data preserved
+        h = store.read_corpus_hash("/old/file.md")
+        assert h is not None
+        assert h["sha256"] == "oldhash"
+        assert h["mount_id"] is None  # NULL from migration
+
+        # New columns usable
+        store.write_corpus_hash(
+            "/new/file.py", "newhash",
+            mount_id="MNT-1", rel_path="file.py", ext=".py",
+            size_bytes=512, mtime_epoch=1700000000,
+        )
+        h2 = store.read_corpus_hash("/new/file.py")
+        assert h2["mount_id"] == "MNT-1"
+
+        # memory_mounts table exists
+        mounts = store.list_mounts()
+        assert isinstance(mounts, list)
+
+        store.close()
+
+    def test_migration_idempotent(self, tmp_path):
+        """Running migration twice is safe."""
+        db_path = str(tmp_path / "idem.db")
+        s1 = MemoryStore(db_path=db_path)
+        s1.write_mount("/tmp/test")
+        s1.close()
+        # Re-open (migration runs again)
+        s2 = MemoryStore(db_path=db_path)
+        mounts = s2.list_mounts()
+        assert len(mounts) == 1
+        s2.close()

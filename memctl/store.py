@@ -38,7 +38,9 @@ from memctl.types import (
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1  # Identical to RAGIX v0.62+; bump only on breaking changes
+SCHEMA_VERSION = 2  # v0.3: corpus_hashes extended, memory_mounts added
+# Forward-compatible with RAGIX (RAGIX can open memctl DBs).
+# Schema identity is not guaranteed after v0.3.
 
 # ---------------------------------------------------------------------------
 # Schema DDL
@@ -115,12 +117,19 @@ CREATE TABLE IF NOT EXISTS memory_events (
 );
 
 -- V2.4: Corpus hash registry for delta mode
+-- V0.3: Extended with mount-related columns
 CREATE TABLE IF NOT EXISTS corpus_hashes (
     file_path   TEXT PRIMARY KEY,
     sha256      TEXT NOT NULL,
     chunk_count INTEGER NOT NULL DEFAULT 0,
     item_ids    TEXT NOT NULL DEFAULT '[]',  -- JSON array of memory item IDs
-    ingested_at TEXT NOT NULL
+    ingested_at TEXT NOT NULL,
+    mount_id    TEXT,                        -- FK to memory_mounts
+    rel_path    TEXT,                        -- path relative to mount root
+    ext         TEXT,                        -- file extension (.md, .py, ...)
+    size_bytes  INTEGER,                     -- file size
+    mtime_epoch INTEGER,                     -- int(stat.st_mtime), UTC
+    lang_hint   TEXT                         -- fr|en|mix|null
 );
 
 -- V3.0: Corpus metadata for cross-corpus operations
@@ -132,6 +141,17 @@ CREATE TABLE IF NOT EXISTS corpus_metadata (
     item_count       INTEGER NOT NULL DEFAULT 0,
     scope            TEXT NOT NULL DEFAULT 'project',
     ingested_at      TEXT NOT NULL
+);
+
+-- V0.3: Mount registry for folder-level sync
+CREATE TABLE IF NOT EXISTS memory_mounts (
+    mount_id     TEXT PRIMARY KEY,
+    path         TEXT NOT NULL UNIQUE,
+    name         TEXT,
+    ignore_json  TEXT NOT NULL DEFAULT '[]',
+    lang_hint    TEXT,
+    created_at   TEXT NOT NULL,
+    last_sync_at TEXT
 );
 
 -- Schema metadata for forward compatibility
@@ -151,6 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_events_item ON memory_events(item_id);
 CREATE INDEX IF NOT EXISTS idx_palace_domain ON memory_palace_locations(domain);
 CREATE INDEX IF NOT EXISTS idx_palace_room ON memory_palace_locations(domain, room);
 CREATE INDEX IF NOT EXISTS idx_items_corpus ON memory_items(corpus_id);
+CREATE INDEX IF NOT EXISTS idx_corpus_mount ON corpus_hashes(mount_id);
 """
 
 # ---------------------------------------------------------------------------
@@ -323,6 +344,19 @@ class MemoryStore:
             )
         except sqlite3.OperationalError:
             pass  # Column already exists
+        # v0.3: Extend corpus_hashes with mount-related columns
+        for col_def in (
+            "mount_id TEXT",
+            "rel_path TEXT",
+            "ext TEXT",
+            "size_bytes INTEGER",
+            "mtime_epoch INTEGER",
+            "lang_hint TEXT",
+        ):
+            try:
+                conn.execute(f"ALTER TABLE corpus_hashes ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists or table doesn't exist yet
 
     def _init_fts5(self) -> None:
         """
@@ -1093,16 +1127,25 @@ class MemoryStore:
     def write_corpus_hash(
         self, file_path: str, sha256: str,
         chunk_count: int = 0, item_ids: Optional[List[str]] = None,
+        *,
+        mount_id: Optional[str] = None,
+        rel_path: Optional[str] = None,
+        ext: Optional[str] = None,
+        size_bytes: Optional[int] = None,
+        mtime_epoch: Optional[int] = None,
+        lang_hint: Optional[str] = None,
     ) -> None:
         """Record or update the hash of an ingested corpus file."""
         with self._lock:
             self._conn.execute(
                 """INSERT OR REPLACE INTO corpus_hashes
-                   (file_path, sha256, chunk_count, item_ids, ingested_at)
-                   VALUES (?,?,?,?,?)""",
+                   (file_path, sha256, chunk_count, item_ids, ingested_at,
+                    mount_id, rel_path, ext, size_bytes, mtime_epoch, lang_hint)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     file_path, sha256, chunk_count,
                     json.dumps(item_ids or []), _now_iso(),
+                    mount_id, rel_path, ext, size_bytes, mtime_epoch, lang_hint,
                 ),
             )
             self._conn.commit()
@@ -1115,13 +1158,21 @@ class MemoryStore:
             ).fetchone()
             if row is None:
                 return None
-            return {
+            d = {
                 "file_path": row["file_path"],
                 "sha256": row["sha256"],
                 "chunk_count": row["chunk_count"],
                 "item_ids": json.loads(row["item_ids"]),
                 "ingested_at": row["ingested_at"],
             }
+            # v0.3 columns (may be NULL on pre-migration rows)
+            for col in ("mount_id", "rel_path", "ext", "size_bytes",
+                        "mtime_epoch", "lang_hint"):
+                try:
+                    d[col] = row[col]
+                except (IndexError, KeyError):
+                    d[col] = None
+            return d
 
     # -- V3.0: Corpus metadata ────────────────────────────────────────────────
 
@@ -1226,3 +1277,130 @@ class MemoryStore:
                 result["deleted"].append({"path": row["file_path"]})
 
         return result
+
+    # -- v0.3: Mount registry ------------------------------------------------
+
+    def write_mount(
+        self,
+        path: str,
+        *,
+        name: Optional[str] = None,
+        ignore_patterns: Optional[List[str]] = None,
+        lang_hint: Optional[str] = None,
+    ) -> str:
+        """Register a folder mount. Returns mount_id (existing or new)."""
+        with self._lock:
+            # Check for duplicate path
+            row = self._conn.execute(
+                "SELECT mount_id FROM memory_mounts WHERE path=?", (path,)
+            ).fetchone()
+            if row:
+                return row["mount_id"]
+            mount_id = _generate_id("MNT")
+            self._conn.execute(
+                """INSERT INTO memory_mounts
+                   (mount_id, path, name, ignore_json, lang_hint, created_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    mount_id, path, name,
+                    json.dumps(ignore_patterns or []),
+                    lang_hint, _now_iso(),
+                ),
+            )
+            self._log_event("mount_register", None, {"mount_id": mount_id, "path": path}, "")
+            self._conn.commit()
+            return mount_id
+
+    def read_mount(self, mount_id_or_path: str) -> Optional[Dict[str, Any]]:
+        """Read a mount by ID or canonical path. Returns None if not found."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM memory_mounts WHERE mount_id=? OR path=?",
+                (mount_id_or_path, mount_id_or_path),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "mount_id": row["mount_id"],
+                "path": row["path"],
+                "name": row["name"],
+                "ignore_patterns": json.loads(row["ignore_json"]),
+                "lang_hint": row["lang_hint"],
+                "created_at": row["created_at"],
+                "last_sync_at": row["last_sync_at"],
+            }
+
+    def list_mounts(self) -> List[Dict[str, Any]]:
+        """List all registered mounts."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memory_mounts ORDER BY created_at"
+            ).fetchall()
+            return [
+                {
+                    "mount_id": r["mount_id"],
+                    "path": r["path"],
+                    "name": r["name"],
+                    "ignore_patterns": json.loads(r["ignore_json"]),
+                    "lang_hint": r["lang_hint"],
+                    "created_at": r["created_at"],
+                    "last_sync_at": r["last_sync_at"],
+                }
+                for r in rows
+            ]
+
+    def remove_mount(self, mount_id_or_name: str) -> bool:
+        """Remove a mount by ID or name. Returns True if deleted."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT mount_id FROM memory_mounts WHERE mount_id=? OR name=?",
+                (mount_id_or_name, mount_id_or_name),
+            ).fetchone()
+            if row is None:
+                return False
+            mid = row["mount_id"]
+            self._conn.execute("DELETE FROM memory_mounts WHERE mount_id=?", (mid,))
+            self._log_event("mount_remove", None, {"mount_id": mid}, "")
+            self._conn.commit()
+            return True
+
+    def update_mount_sync_time(self, mount_id: str) -> None:
+        """Update last_sync_at for a mount to now."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE memory_mounts SET last_sync_at=? WHERE mount_id=?",
+                (_now_iso(), mount_id),
+            )
+            self._conn.commit()
+
+    def list_corpus_files(
+        self, mount_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List corpus files, optionally filtered by mount_id. For inspect."""
+        with self._lock:
+            if mount_id:
+                rows = self._conn.execute(
+                    "SELECT * FROM corpus_hashes WHERE mount_id=? ORDER BY file_path",
+                    (mount_id,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM corpus_hashes ORDER BY file_path"
+                ).fetchall()
+            result = []
+            for row in rows:
+                d = {
+                    "file_path": row["file_path"],
+                    "sha256": row["sha256"],
+                    "chunk_count": row["chunk_count"],
+                    "item_ids": json.loads(row["item_ids"]),
+                    "ingested_at": row["ingested_at"],
+                }
+                for col in ("mount_id", "rel_path", "ext", "size_bytes",
+                            "mtime_epoch", "lang_hint"):
+                    try:
+                        d[col] = row[col]
+                    except (IndexError, KeyError):
+                        d[col] = None
+                result.append(d)
+            return result

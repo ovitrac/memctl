@@ -7,6 +7,28 @@ Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---
 
+## [0.3.0] - 2026-02-20
+
+Folder mount, structural sync, and inspection — three new commands.
+
+### Added
+
+- **Folder mount** (`mount.py`): Register folders as structured sources with `memctl mount <path>`. Stores metadata only — no scanning, no ingestion. Options: `--name`, `--ignore`, `--lang`. List with `--list`, remove with `--remove`.
+- **Delta sync** (`sync.py`): Scan mounted folders with `memctl sync [<path>]`. 3-tier delta rule: (1) not in DB → ingest, (2) size+mtime match → fast skip without hashing, (3) hash → compare → ingest if different. Auto-registers mount if path given without prior `memctl mount`. `--full` forces re-processing. `--json` for machine output.
+- **Structural inspect** (`inspect.py`): Generate deterministic structural injection blocks with `memctl inspect [<path>]`. Positional path auto-mounts and auto-syncs (`inspect_path()` orchestration). Flags: `--sync auto|always|never`, `--no-sync`, `--mount-mode persist|ephemeral`, `--ignore`. Tier 0 staleness check (inventory comparison via path/size/mtime triples) skips sync when store is fresh. All paths in output are mount-relative (never absolute). Reports: file/chunk/size totals, per-folder breakdown, per-extension distribution, top-5 largest files, rule-based observations. Token-bounded via `--budget`. `--json` includes `observation_thresholds` and orchestration metadata.
+- **Schema v2**: `SCHEMA_VERSION` bumped from 1 to 2. `corpus_hashes` extended with 6 columns (`mount_id`, `rel_path`, `ext`, `size_bytes`, `mtime_epoch`, `lang_hint`). New `memory_mounts` table. Migration is additive (ALTER TABLE ADD COLUMN) and idempotent.
+- **Observation rules**: Four hardcoded constants (frozen in v0.3) for deterministic structural observations — `DOMINANCE_FRAC=0.40`, `LOW_DENSITY_THRESHOLD=0.10`, `EXT_CONCENTRATION_FRAC=0.75`, `SPARSE_THRESHOLD=1`. Exported as `OBSERVATION_THRESHOLDS` dict and included in `--json` output.
+- **Size accounting** (`ingest.py`): `ingest_file()` now writes `size_bytes` and `ext` to `corpus_hashes`, ensuring inspect never shows "0 B" or "unknown" for ingestable files. Inspect falls back to `os.stat()` for legacy entries.
+- **Test suite** expanded to 474 tests across 14 files (+142 tests: 15 mount, 25 sync, 49 inspect, 27 store mount/migration, 18 CLI mount/sync/inspect, 8 forward compat).
+
+### Changed
+
+- **Schema compatibility stance**: memctl remains forward-compatible with RAGIX (RAGIX can open memctl DBs). Schema identity is not guaranteed after v0.3. New table and columns are ignored by RAGIX.
+- **Timestamp rule**: Filesystem `mtime` stored as `INTEGER` epoch seconds (`int(os.stat().st_mtime)`). Logical events continue using `TEXT` ISO-8601 UTC.
+- **CLI**: 12 commands (was 9). New: `mount`, `sync`, `inspect`.
+
+---
+
 ## [0.2.1] - 2026-02-19
 
 ### Fixed

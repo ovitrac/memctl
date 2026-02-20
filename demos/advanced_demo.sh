@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =========================================================================
-# advanced_demo.sh — memctl loop + consolidation demo
+# advanced_demo.sh — memctl loop + consolidation + structural inspect demo
 #
 # Proves the advanced control-plane properties that make memctl
 # a real orchestration primitive, not just a key-value store:
@@ -9,6 +9,8 @@
 #   2. Fixed-point convergence     — loop stops when answers stabilize
 #   3. JSONL trace + replay        — every iteration auditable + replayable
 #   4. Deterministic consolidation — STM → MTM merge, no LLM needed
+#   5. Folder mount + sync         — delta-aware ingestion from directories
+#   6. Structural inspect          — memctl introspects its own source tree
 #
 # Self-contained (mock LLM). No network. No services.
 # Feature-gated: gracefully skips unavailable commands.
@@ -65,14 +67,19 @@ if ! has_cmd consolidate; then
     HAS_CONSOLIDATE=false
     warn "consolidate command not available — Step 4 will be skipped"
 fi
+HAS_MOUNT=true
+if ! has_cmd mount; then
+    HAS_MOUNT=false
+    warn "mount/sync/inspect not available — Steps 5-6 will be skipped"
+fi
 
-STEPS=4
+STEPS=6
 
 # -- Banner ----------------------------------------------------------------
 printf "\n"
 printf "${C}${BD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 printf "${C}${BD}  memctl — Advanced Demo${NC}\n"
-printf "${C}${BD}  bounded loop · convergence · trace · consolidation${NC}\n"
+printf "${C}${BD}  loop · convergence · trace · consolidation · mount · inspect${NC}\n"
 printf "${C}${BD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 T0=$SECONDS
 
@@ -225,6 +232,78 @@ else
 fi
 
 # =========================================================================
+# 5. FOLDER MOUNT + SYNC
+# =========================================================================
+if [[ "$HAS_MOUNT" == "true" ]]; then
+    step 5 $STEPS "Folder mount + delta sync"
+    printf "\n"
+    printf "  ${D}Mount a folder → sync scans files → delta detects changes.${NC}\n"
+    printf "  ${D}Second sync skips unchanged files (mtime + sha256 match).${NC}\n"
+    printf "  ${D}No file watchers, no background processes — explicit sync only.${NC}\n"
+    printf "\n"
+
+    MINI_CORPUS="$SCRIPT_DIR/corpus-mini"
+
+    cmd "memctl mount demos/corpus-mini/ --name \"mini-corpus\""
+    mem mount "$MINI_CORPUS" --name "mini-corpus" 2>/dev/null || true
+
+    cmd "memctl sync demos/corpus-mini/"
+    SYNC_OUT=$(mem sync "$MINI_CORPUS" --json 2>/dev/null)
+    SYNC_NEW=$(printf '%s' "$SYNC_OUT" | json_field files_new)
+    SYNC_SCANNED=$(printf '%s' "$SYNC_OUT" | json_field files_scanned)
+    SYNC_CHUNKS=$(printf '%s' "$SYNC_OUT" | json_field chunks_created)
+    ok "First sync: ${SYNC_SCANNED} files scanned, ${SYNC_NEW} new, ${SYNC_CHUNKS} chunks"
+
+    cmd "memctl sync demos/corpus-mini/  # second time — delta mode"
+    SYNC_OUT2=$(mem sync "$MINI_CORPUS" --json 2>/dev/null)
+    SYNC_UNCHANGED=$(printf '%s' "$SYNC_OUT2" | json_field files_unchanged)
+    SYNC_NEW2=$(printf '%s' "$SYNC_OUT2" | json_field files_new)
+    ok "Delta sync: ${SYNC_UNCHANGED} unchanged, ${SYNC_NEW2} new — fast skip"
+
+    cmd "memctl mount --list"
+    MOUNT_COUNT=$(mem mount --list --json 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
+    ok "${MOUNT_COUNT} mount(s) registered"
+
+# =========================================================================
+# 6. STRUCTURAL INSPECT — MEMCTL INTROSPECTS ITSELF
+# =========================================================================
+    step 6 $STEPS "Structural inspect — memctl introspects its own source"
+    printf "\n"
+    printf "  ${D}The inspect command generates a deterministic structural summary${NC}\n"
+    printf "  ${D}from corpus metadata: folders, extensions, density, observations.${NC}\n"
+    printf "  ${D}No LLM calls. Same files → same output. Pipeable to memctl loop.${NC}\n"
+    printf "\n"
+
+    cmd "memctl sync memctl/  # ingest memctl's own source tree"
+    mem sync "$PROJECT_ROOT/memctl" --json >/dev/null 2>&1
+
+    cmd "memctl inspect"
+    INSPECT_OUT=$(mem inspect 2>/dev/null)
+    if [[ -n "$INSPECT_OUT" ]]; then
+        ok "Structural injection block generated"
+        print_answer "$INSPECT_OUT" 25
+        printf "\n"
+        STATS_JSON=$(mem inspect --json 2>/dev/null)
+        INSP_FILES=$(printf '%s' "$STATS_JSON" | json_field total_files)
+        INSP_CHUNKS=$(printf '%s' "$STATS_JSON" | json_field total_chunks)
+        ok "Stats: ${INSP_FILES} files, ${INSP_CHUNKS} chunks across all mounts"
+
+        # Show observations if any
+        OBS_COUNT=$(printf '%s' "$STATS_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('observations',[])))" 2>/dev/null)
+        if [[ "$OBS_COUNT" -gt 0 ]]; then
+            ok "${OBS_COUNT} structural observation(s) detected"
+        fi
+    else
+        fail "Inspect produced no output"
+    fi
+else
+    step 5 $STEPS "Folder mount + delta sync"
+    skip "mount/sync not available in this build"
+    step 6 $STEPS "Structural inspect"
+    skip "inspect not available in this build"
+fi
+
+# =========================================================================
 # RESULTS
 # =========================================================================
 ELAPSED=$(( SECONDS - T0 ))
@@ -236,6 +315,7 @@ DB_SIZE=$(du -h "$DB" | cut -f1)
 COMPLETED=0
 [[ "$HAS_LOOP" == "true" ]] && COMPLETED=$((COMPLETED + 3))
 [[ "$HAS_CONSOLIDATE" == "true" ]] && COMPLETED=$((COMPLETED + 1))
+[[ "$HAS_MOUNT" == "true" ]] && COMPLETED=$((COMPLETED + 2))
 
 printf "\n"
 printf "${C}${BD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -251,11 +331,14 @@ printf "  ${D}  An LLM can iteratively refine its understanding — but memctl${
 printf "  ${D}  controls the loop: bounded calls, cycle detection, convergence.${NC}\n"
 printf "  ${D}  Every iteration is traced. Every trace is replayable.${NC}\n"
 printf "  ${D}  Memory consolidates deterministically — no LLM required.${NC}\n"
+printf "  ${D}  Folders mount, sync detects deltas, inspect reveals structure.${NC}\n"
 printf "\n"
 printf "  ${W}${BD}The full pipeline:${NC}\n"
-printf '%s\n' "      memctl push \"query\" --source docs/ \\"
-printf '%s\n' "        | memctl loop \"question\" --llm \"claude -p\" --trace \\"
-printf '%s\n' "        | memctl pull --tags result --title \"Analysis\""
+printf '%s\n' "      memctl mount docs/ --name project-docs"
+printf '%s\n' "      memctl sync"
+printf '%s\n' "      memctl inspect \\"
+printf '%s\n' "        | memctl loop \"summarize structure\" --llm \"claude -p\" \\"
+printf '%s\n' "        | memctl pull --tags structure --title \"Folder analysis\""
 
 print_versions
 

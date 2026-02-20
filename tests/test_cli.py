@@ -1,5 +1,5 @@
 """
-Tests for memctl CLI — all 9 commands via subprocess.
+Tests for memctl CLI — all 12 commands via subprocess.
 
 Every test exercises the real binary (`python -m memctl.cli`) against a
 temporary SQLite database so there are no side-effects on the developer
@@ -525,3 +525,213 @@ class TestExitCodes:
     def test_show_missing_item_is_one(self, db):
         r = run(["show", "MEM-nonexistent", "--db", db, "-q"])
         assert r.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# mount
+# ---------------------------------------------------------------------------
+
+
+class TestMountCLI:
+    def test_mount_register(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        r = run(["mount", str(folder), "--db", db])
+        assert r.returncode == 0
+        assert "MNT-" in r.stderr or "Mounted" in r.stderr
+
+    def test_mount_list_empty(self, db):
+        r = run(["mount", "--list", "--db", db, "-q"])
+        assert r.returncode == 0
+
+    def test_mount_list_after_register(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        run(["mount", str(folder), "--name", "docs", "--db", db, "-q"])
+        r = run(["mount", "--list", "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "docs" in r.stdout or "MNT-" in r.stdout
+
+    def test_mount_list_json(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        run(["mount", str(folder), "--name", "docs", "--db", db, "-q"])
+        r = run(["mount", "--list", "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["name"] == "docs"
+
+    def test_mount_remove(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        run(["mount", str(folder), "--name", "docs", "--db", db, "-q"])
+        r = run(["mount", "--remove", "docs", "--db", db, "-q"])
+        assert r.returncode == 0
+        r2 = run(["mount", "--list", "--json", "--db", db, "-q"])
+        data = json.loads(r2.stdout)
+        assert len(data) == 0
+
+    def test_mount_nonexistent_path(self, db, tmp_path):
+        r = run(["mount", str(tmp_path / "nope"), "--db", db, "-q"])
+        assert r.returncode == 1
+
+    def test_mount_with_ignore(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        r = run(["mount", str(folder), "--ignore", "*.log", "tmp/*", "--db", db, "-q"])
+        assert r.returncode == 0
+
+    def test_mount_with_lang(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        r = run(["mount", str(folder), "--lang", "fr", "--db", db, "-q"])
+        assert r.returncode == 0
+
+    def test_mount_help(self):
+        r = run(["mount", "--help"])
+        assert r.returncode == 0
+        assert "--name" in r.stdout
+        assert "--ignore" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# sync
+# ---------------------------------------------------------------------------
+
+
+class TestSyncCLI:
+    def test_sync_path(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        (folder / "readme.md").write_text("# Hello\n\nContent here.")
+        r = run(["sync", str(folder), "--db", db, "-q"])
+        assert r.returncode == 0
+
+    def test_sync_json(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        (folder / "readme.md").write_text("# Hello\n\nContent here.")
+        r = run(["sync", str(folder), "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["files_scanned"] >= 1
+
+    def test_sync_all_no_mounts(self, db):
+        r = run(["sync", "--db", db, "-q"])
+        assert r.returncode == 0
+
+    def test_sync_full_flag(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        (folder / "readme.md").write_text("# Hello\n\nContent here.")
+        run(["sync", str(folder), "--db", db, "-q"])
+        r = run(["sync", str(folder), "--full", "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["files_unchanged"] == 0
+
+    def test_sync_help(self):
+        r = run(["sync", "--help"])
+        assert r.returncode == 0
+        assert "--full" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# inspect
+# ---------------------------------------------------------------------------
+
+
+class TestInspectCLI:
+    def test_inspect_empty(self, db):
+        r = run(["inspect", "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "No files found" in r.stdout
+
+    def test_inspect_after_sync(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        (folder / "guide.md").write_text("# Guide\n\nDetailed guide.\n\nMore details.")
+        run(["sync", str(folder), "--db", db, "-q"])
+        r = run(["inspect", "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "## Structure (Injected)" in r.stdout
+        assert "Total files:" in r.stdout
+
+    def test_inspect_json(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        (folder / "guide.md").write_text("# Guide\n\nContent.")
+        run(["sync", str(folder), "--db", db, "-q"])
+        r = run(["inspect", "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert "total_files" in data
+        assert data["total_files"] >= 1
+
+    def test_inspect_budget(self, db, tmp_path):
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        (folder / "guide.md").write_text("# Guide\n\nContent.")
+        run(["sync", str(folder), "--db", db, "-q"])
+        r = run(["inspect", "--budget", "10", "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "[...truncated]" in r.stdout
+
+    def test_inspect_help(self):
+        r = run(["inspect", "--help"])
+        assert r.returncode == 0
+        assert "--mount" in r.stdout
+        assert "--budget" in r.stdout
+        assert "--sync" in r.stdout
+        assert "--mount-mode" in r.stdout
+
+    def test_inspect_with_path(self, db, tmp_path):
+        """inspect <path> auto-mounts + auto-syncs + produces injection block."""
+        folder = tmp_path / "source"
+        folder.mkdir()
+        (folder / "api.md").write_text("# API\n\nEndpoint docs.\n\nDetails.")
+        r = run(["inspect", str(folder), "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "## Structure (Injected)" in r.stdout
+        assert "Total files:" in r.stdout
+
+    def test_inspect_with_path_json(self, db, tmp_path):
+        """inspect <path> --json includes orchestration keys."""
+        folder = tmp_path / "source"
+        folder.mkdir()
+        (folder / "guide.md").write_text("# Guide\n\nContent.\n\nMore.")
+        r = run(["inspect", str(folder), "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert "total_files" in data
+        assert "was_mounted" in data
+        assert "was_synced" in data
+        assert data["total_files"] >= 1
+
+    def test_inspect_with_path_no_sync(self, db, tmp_path):
+        """inspect <path> --no-sync skips sync even when stale."""
+        folder = tmp_path / "source"
+        folder.mkdir()
+        (folder / "guide.md").write_text("# Guide\n\nContent.")
+        r = run(["inspect", str(folder), "--no-sync", "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["was_synced"] is False
+        assert data["total_files"] == 0  # never synced
+
+    def test_inspect_with_path_ephemeral(self, db, tmp_path):
+        """inspect <path> --mount-mode=ephemeral cleans up mount."""
+        folder = tmp_path / "source"
+        folder.mkdir()
+        (folder / "guide.md").write_text("# Guide\n\nContent.")
+        r = run(["inspect", str(folder), "--mount-mode", "ephemeral",
+                 "--json", "--db", db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["was_ephemeral"] is True
+        # Verify mount is gone
+        r2 = run(["mount", "--list", "--json", "--db", db, "-q"])
+        mounts = json.loads(r2.stdout)
+        assert not any(m["mount_id"] == data["mount_id"] for m in mounts)

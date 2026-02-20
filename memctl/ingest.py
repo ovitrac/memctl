@@ -384,8 +384,12 @@ def ingest_file(
         store.write_item(item, reason="ingest")
         item_ids.append(item.id)
 
-    # Record corpus hash
-    store.write_corpus_hash(abs_path, sha256, len(chunks), item_ids)
+    # Record corpus hash (always include size + ext for inspect accounting)
+    store.write_corpus_hash(
+        abs_path, sha256, len(chunks), item_ids,
+        ext=Path(abs_path).suffix.lower() or None,
+        size_bytes=os.path.getsize(abs_path),
+    )
 
     logger.info(
         "Ingested %s: %d chunks, ids=%s",

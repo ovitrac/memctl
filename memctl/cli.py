@@ -10,6 +10,9 @@ Commands:
     memctl stats                             — store metrics
     memctl consolidate [--dry-run]           — merge + promote STM items
     memctl loop   "query" --llm CMD          — bounded recall-answer loop
+    memctl mount  <path> [--name N]          — register folder for sync
+    memctl sync   [<path>] [--full]          — scan + ingest mounted folders
+    memctl inspect [--mount M] [--budget N]  — structural injection block → stdout
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -671,6 +674,205 @@ def cmd_loop(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: mount  (register folder for sync)
+# ===========================================================================
+
+
+def cmd_mount(args: argparse.Namespace) -> None:
+    """Register, list, or remove folder mounts."""
+    from memctl.mount import register_mount, list_mounts, remove_mount
+
+    db_path = _resolve_db(args)
+
+    if getattr(args, "list", False):
+        mounts = list_mounts(db_path)
+        if getattr(args, "json", False):
+            print(json.dumps(mounts, indent=2, ensure_ascii=False))
+            return
+        if not mounts:
+            _info("No mounts registered.")
+            return
+        else:
+            for m in mounts:
+                synced = m["last_sync_at"] or "never"
+                label = f" ({m['name']})" if m["name"] else ""
+                print(f"  {m['mount_id']}{label}  {m['path']}  synced={synced}")
+        return
+
+    if getattr(args, "remove", None):
+        ok = remove_mount(db_path, args.remove)
+        if ok:
+            _info(f"Removed mount: {args.remove}")
+        else:
+            _warn(f"Mount not found: {args.remove}")
+            sys.exit(1)
+        return
+
+    # Register mode (default)
+    if not args.path:
+        _warn("Usage: memctl mount <path> [--name NAME] [--ignore PATTERN...]")
+        sys.exit(1)
+
+    ignore = getattr(args, "ignore", None) or []
+    lang = getattr(args, "lang", None)
+    name = getattr(args, "name", None)
+
+    try:
+        mount_id = register_mount(
+            db_path, args.path,
+            name=name,
+            ignore_patterns=ignore,
+            lang_hint=lang,
+        )
+    except (FileNotFoundError, NotADirectoryError) as e:
+        _warn(f"Error: {e}")
+        sys.exit(1)
+
+    _info(f"Mounted: {mount_id} → {os.path.realpath(args.path)}")
+
+
+# ===========================================================================
+# Command: sync  (scan + ingest mounted folders)
+# ===========================================================================
+
+
+def cmd_sync(args: argparse.Namespace) -> None:
+    """Sync mounted folders into the memory store."""
+    from memctl.sync import sync_mount, sync_all
+
+    db_path = _resolve_db(args)
+    full = getattr(args, "full", False)
+    quiet = getattr(args, "quiet", False)
+
+    if getattr(args, "path", None):
+        # Sync specific path
+        try:
+            result = sync_mount(
+                db_path, args.path,
+                delta=not full,
+                quiet=quiet,
+            )
+        except (FileNotFoundError, NotADirectoryError) as e:
+            _warn(f"Error: {e}")
+            sys.exit(1)
+
+        if getattr(args, "json", False):
+            print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        else:
+            _info(
+                f"[sync] {result.files_new} new, {result.files_changed} changed, "
+                f"{result.files_unchanged} unchanged, {result.chunks_created} chunks"
+            )
+    else:
+        # Sync all mounts
+        results = sync_all(db_path, delta=not full, quiet=quiet)
+        if not results:
+            _info("[sync] No mounts registered. Use 'memctl mount <path>' or 'memctl sync <path>'.")
+            return
+        if getattr(args, "json", False):
+            print(json.dumps(
+                {k: v.to_dict() for k, v in results.items()},
+                indent=2, ensure_ascii=False,
+            ))
+        else:
+            for path, r in results.items():
+                _info(
+                    f"[sync] {path}: {r.files_new} new, {r.files_changed} changed, "
+                    f"{r.files_unchanged} unchanged, {r.chunks_created} chunks"
+                )
+
+
+# ===========================================================================
+# Command: inspect  (structural injection block → stdout)
+# ===========================================================================
+
+
+def cmd_inspect(args: argparse.Namespace) -> None:
+    """Generate a structural injection block from corpus metadata.
+
+    With positional path: auto-mount + auto-sync + inspect (orchestration mode).
+    Without positional path: inspect existing store (classic mode).
+    """
+    from memctl.inspect import inspect_mount, inspect_stats
+
+    db_path = _resolve_db(args)
+    budget = _resolve_budget(args)
+
+    # --- Orchestration mode: positional path provided ---
+    path = getattr(args, "path", None)
+    if path is not None:
+        from memctl.inspect import inspect_path
+
+        # Warn if --mount filter is also given (path takes precedence)
+        if getattr(args, "mount", None):
+            _warn("--mount filter ignored when positional path is provided")
+
+        sync_mode = (
+            "never" if getattr(args, "no_sync", False)
+            else getattr(args, "sync", "auto")
+        )
+        mount_mode = getattr(args, "mount_mode", "persist")
+        ignore = getattr(args, "ignore", None) or None
+
+        try:
+            result = inspect_path(
+                db_path, path,
+                sync_mode=sync_mode,
+                mount_mode=mount_mode,
+                budget=budget,
+                ignore_patterns=ignore,
+                log=_info,
+            )
+        except (FileNotFoundError, NotADirectoryError) as e:
+            _warn(str(e))
+            sys.exit(1)
+        except ValueError as e:
+            _warn(str(e))
+            sys.exit(1)
+
+        if getattr(args, "json", False):
+            print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+        else:
+            text = inspect_mount(
+                db_path,
+                mount_id=result.mount_id,
+                mount_label=result.mount_label,
+                budget=budget,
+            )
+            print(text)
+        return
+
+    # --- Classic mode: no positional path ---
+    mount_filter = getattr(args, "mount", None)
+    mount_id = None
+    mount_label = None
+    if mount_filter:
+        from memctl.store import MemoryStore
+        store = MemoryStore(db_path=db_path)
+        try:
+            m = store.read_mount(mount_filter)
+        finally:
+            store.close()
+        if m is None:
+            _warn(f"Mount not found: {mount_filter}")
+            sys.exit(1)
+        mount_id = m["mount_id"]
+        mount_label = m.get("name") or m["path"]
+
+    if getattr(args, "json", False):
+        stats = inspect_stats(db_path, mount_id=mount_id)
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+    else:
+        text = inspect_mount(
+            db_path,
+            mount_id=mount_id,
+            mount_label=mount_label,
+            budget=budget,
+        )
+        print(text)
+
+
+# ===========================================================================
 # Command: serve  (start MCP server)
 # ===========================================================================
 
@@ -889,6 +1091,73 @@ def main() -> None:
         help="Replay a trace file (no LLM calls)",
     )
     p_loop.set_defaults(func=cmd_loop)
+
+    # -- mount -------------------------------------------------------------
+    p_mount = sub.add_parser(
+        "mount", parents=[_common],
+        help="Register folder for sync",
+    )
+    p_mount.add_argument("path", nargs="?", default=None, help="Folder path to mount")
+    p_mount.add_argument("--name", default=None, help="Human-readable label")
+    p_mount.add_argument(
+        "--ignore", nargs="+", default=None,
+        help="Glob patterns to exclude during sync",
+    )
+    p_mount.add_argument(
+        "--lang", default=None, choices=["fr", "en", "mix"],
+        help="Language hint for FTS tokenizer selection",
+    )
+    p_mount.add_argument("--list", action="store_true", default=argparse.SUPPRESS, help="List mounts")
+    p_mount.add_argument("--remove", default=None, metavar="ID", help="Remove mount by ID or name")
+    p_mount.set_defaults(func=cmd_mount)
+
+    # -- sync --------------------------------------------------------------
+    p_sync = sub.add_parser(
+        "sync", parents=[_common],
+        help="Scan + ingest mounted folders",
+    )
+    p_sync.add_argument("path", nargs="?", default=None, help="Folder path (auto-registers)")
+    p_sync.add_argument(
+        "--full", action="store_true",
+        help="Re-process all files (ignore delta cache)",
+    )
+    p_sync.set_defaults(func=cmd_sync)
+
+    # -- inspect -----------------------------------------------------------
+    p_inspect = sub.add_parser(
+        "inspect", parents=[_common],
+        help="Structural injection block → stdout (auto-mounts/syncs if path given)",
+    )
+    p_inspect.add_argument(
+        "path", nargs="?", default=None,
+        help="Folder to inspect (auto-mounts and auto-syncs as needed)",
+    )
+    p_inspect.add_argument(
+        "--mount", default=None, metavar="ID_OR_NAME",
+        help="Filter by registered mount (classic mode, no positional path)",
+    )
+    p_inspect.add_argument(
+        "--budget", type=int, default=None,
+        help="Token budget (default: MEMCTL_BUDGET or 2200)",
+    )
+    p_inspect.add_argument(
+        "--sync", default="auto", choices=["auto", "always", "never"],
+        help="Sync mode: auto (default), always, or never",
+    )
+    p_inspect.add_argument(
+        "--no-sync", action="store_true", default=False,
+        help="Skip sync (equivalent to --sync=never)",
+    )
+    p_inspect.add_argument(
+        "--mount-mode", dest="mount_mode", default="persist",
+        choices=["persist", "ephemeral"],
+        help="Keep mount (persist, default) or remove after inspect (ephemeral)",
+    )
+    p_inspect.add_argument(
+        "--ignore", nargs="+", default=None,
+        help="Glob patterns to exclude when auto-mounting",
+    )
+    p_inspect.set_defaults(func=cmd_inspect)
 
     # -- serve -------------------------------------------------------------
     p_serve = sub.add_parser("serve", parents=[_common], help="Start MCP server")
