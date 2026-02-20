@@ -1092,6 +1092,10 @@ def cmd_import(args: argparse.Namespace) -> None:
         print(f"  Skipped (policy):{result.skipped_policy}")
         print(f"  Errors:          {result.errors}")
 
+    # Exit 1 when all lines failed (v0.7 exit code conformance)
+    if result.errors > 0 and result.imported == 0:
+        sys.exit(1)
+
 
 # ===========================================================================
 # Command: serve  (start MCP server)
@@ -1121,6 +1125,12 @@ def cmd_serve(args: argparse.Namespace) -> None:
     except ImportError:
         _warn("MCP dependencies not installed. Run: pip install memctl[mcp]")
         sys.exit(1)
+
+    # --check mode: verify server, print status, exit
+    if getattr(args, "check", False):
+        from memctl import __version__
+        print(f"memctl MCP server OK (v{__version__}, db={server_args.db})")
+        return
 
     _info(f"memctl MCP server (db={server_args.db})")
     _info("Press Ctrl+C to stop.")
@@ -1513,6 +1523,10 @@ def main() -> None:
     p_serve.add_argument(
         "--fts-tokenizer", default=None,
         help="FTS5 tokenizer preset: fr|en|raw (default: MEMCTL_FTS or fr)",
+    )
+    p_serve.add_argument(
+        "--check", action="store_true", default=False,
+        help="Verify server can start (create + tool count), then exit",
     )
     p_serve.set_defaults(func=cmd_serve)
 

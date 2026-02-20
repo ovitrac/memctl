@@ -7,6 +7,46 @@ Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---
 
+## [0.7.0] - 2026-02-20
+
+MCP feature parity and security hardening.
+
+### Added
+
+- **MCP feature parity** (7 new tools, 7→14 total):
+  - `memory_mount` — register, list, or remove folder mounts
+  - `memory_sync` — sync mounted folders (delta or full)
+  - `memory_inspect` — structural injection block from corpus metadata
+  - `memory_ask` — one-shot folder Q&A (mount + sync + inspect + loop)
+  - `memory_export` — JSONL export with filters (capped at 1000 items)
+  - `memory_import` — JSONL import with policy enforcement and dedup
+  - `memory_loop` — bounded recall-answer loop with convergence detection
+- **PII detection** (`policy.py`): 5 quarantine-level patterns — US SSN, credit card (Visa/MC/Amex/Discover), email, phone (US+international), IBAN. PII is quarantined (`injectable=False`), not rejected, preserving data for admin access while preventing LLM injection.
+- **Config validation** (`config.py`): `validate()` method on all config dataclasses. Range checks for 11 numeric fields. `ValidationError(ValueError)` exception. `load_config(strict=True)` raises on invalid values.
+- **MCP installer** (`scripts/install_mcp.sh`): One-command setup for Claude Code and Claude Desktop. Checks prerequisites (Python 3.10+, pip), installs `memctl[mcp]`, configures the client's MCP config (deterministic insert/update with timestamped `.bak` backup), initializes workspace, and verifies server. Options: `--client claude-code|claude-desktop|all`, `--python PATH`, `--db PATH`, `--dry-run`, `--yes`.
+- **`memctl serve --check`**: Verify MCP server can start (create + tool registration) without running the server loop. Used by the installer for verification.
+- **Test suite** expanded to ~652 tests across 22 files (+~108 tests: 38 MCP tools, 21 PII patterns, 20 config validation, 16 exit codes, 13 other).
+
+### Fixed
+
+- **`evaluate_item()` soft-block gap**: `memory_write` MCP tool now applies instructional-quarantine and PII patterns (previously only hard blocks were checked). Items matching soft-block patterns are stored with `injectable=False`.
+- **`cmd_import` exit code**: Returns exit 1 when all lines fail (errors > 0, imported == 0).
+
+### Changed
+
+- **MCP instructions** updated: tool count (7→14), folder/data/loop categories, PII quarantine rule.
+- **PolicyConfig**: New field `pii_patterns_enabled: bool = True`.
+- **Breaking (security)**: `evaluate_item()` now quarantines content matching instructional-quarantine and PII patterns. Previously-passing content may now be stored with `injectable=False`. This is intentional security hardening.
+
+### Design Decisions
+
+- **PII quarantine, not reject**: Email/phone may be intentional (contact directories, provenance). Quarantine prevents LLM injection while preserving data.
+- **No `memory_chat` MCP tool**: Chat is an interactive REPL (readline, TTY, session state) — incompatible with MCP request-response. `memory_recall` + `memory_loop` provides equivalent programmatic access.
+- **`memory_import` accepts JSON array string**: MCP params are JSON. JSONL-as-string would require double-serialization. Internally converted.
+- **`memory_export` capped at 1000 items**: MCP responses have practical size limits. Truncation indicated.
+
+---
+
 ## [0.6.0] - 2026-02-20
 
 Operability and polish: export/import, chat UX hardening, config file support.

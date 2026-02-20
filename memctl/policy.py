@@ -108,6 +108,25 @@ _INSTRUCTIONAL_QUARANTINE_PATTERNS = [
     re.compile(r"(?:from\s+now\s+on|henceforth|going\s+forward)\s*[,.]?\s+", re.IGNORECASE),
 ]
 
+# V7: PII detection patterns (quarantine — not reject)
+# PII in memory may be intentional (contact directories, provenance).
+# Quarantine prevents injection into LLM context while preserving data.
+_PII_PATTERNS = [
+    # US Social Security Number (NNN-NN-NNNN)
+    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    # Credit card: Visa, MC, Amex, Discover
+    re.compile(
+        r"\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))"
+        r"[- ]?\d{4}[- ]?\d{4}[- ]?\d{3,4}\b"
+    ),
+    # Email address (conservative)
+    re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+    # Phone number (US + international)
+    re.compile(r"(?<!\d)(?:\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)"),
+    # IBAN (European bank accounts)
+    re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"),
+]
+
 
 # ---------------------------------------------------------------------------
 # Policy Engine
@@ -184,6 +203,13 @@ class MemoryPolicy:
                 quarantine_reasons.extend(inst_quarantine_hits)
                 force_non_injectable = True
 
+        # V7: PII patterns
+        if self._config.pii_patterns_enabled:
+            pii_hits = self._check_pii(text)
+            if pii_hits:
+                quarantine_reasons.extend(pii_hits)
+                force_non_injectable = True
+
         # Low confidence
         if proposal.why_store == "":
             quarantine_reasons.append("Missing why_store justification")
@@ -255,6 +281,36 @@ class MemoryPolicy:
         if action == "reject":
             return PolicyVerdict(action="reject", reasons=reasons)
 
+        # --- Soft blocks (v0.7) ---
+        quarantine_reasons: List[str] = []
+        force_non_injectable = False
+
+        if self._config.instructional_content_enabled:
+            inst_hits = self._check_instructional_quarantine(text)
+            if inst_hits:
+                quarantine_reasons.extend(inst_hits)
+                force_non_injectable = True
+
+        if self._config.pii_patterns_enabled:
+            pii_hits = self._check_pii(text)
+            if pii_hits:
+                quarantine_reasons.extend(pii_hits)
+                force_non_injectable = True
+
+        if quarantine_reasons:
+            expiry = (
+                datetime.now(timezone.utc)
+                + timedelta(hours=self._config.quarantine_expiry_hours)
+            ).isoformat()
+            return PolicyVerdict(
+                action="quarantine",
+                reasons=quarantine_reasons,
+                forced_tier="stm",
+                forced_validation="unverified",
+                forced_expires_at=expiry,
+                forced_non_injectable=force_non_injectable,
+            )
+
         return PolicyVerdict(action="accept", reasons=[])
 
     # -- Pattern checks ----------------------------------------------------
@@ -289,4 +345,12 @@ class MemoryPolicy:
         for i, pattern in enumerate(_INSTRUCTIONAL_QUARANTINE_PATTERNS):
             if pattern.search(text):
                 hits.append(f"QUARANTINE: instructional_self_instruction pattern #{i} matched")
+        return hits
+
+    def _check_pii(self, text: str) -> List[str]:
+        """Check for PII patterns (SSN, credit card, email, phone, IBAN)."""
+        hits = []
+        for i, pattern in enumerate(_PII_PATTERNS):
+            if pattern.search(text):
+                hits.append(f"QUARANTINE: pii pattern #{i} matched")
         return hits

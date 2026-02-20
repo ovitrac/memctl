@@ -26,12 +26,16 @@ logger = logging.getLogger(__name__)
 
 # Instructions embedded in FastMCP — always visible to any MCP client.
 _MCP_INSTRUCTIONS = (
-    "Persistent structured memory for LLM orchestration.\n"
+    "Persistent structured memory for LLM orchestration (14 tools).\n"
     "\n"
     "PRIMARY: Use memory_recall for token-budgeted context injection.\n"
     "SEARCH:  Use memory_search for interactive discovery.\n"
     "STORE:   Use memory_propose to save findings (tags + provenance).\n"
     "         Use memory_write only for privileged/dev operations.\n"
+    "FOLDER:  Use memory_mount to register folders, memory_sync to ingest,\n"
+    "         memory_inspect for structural summaries, memory_ask for Q&A.\n"
+    "DATA:    Use memory_export/memory_import for JSONL backup/migration.\n"
+    "LOOP:    Use memory_loop for iterative recall-answer refinement.\n"
     "\n"
     "Rules:\n"
     "- Store distilled knowledge, NOT raw document excerpts\n"
@@ -39,6 +43,7 @@ _MCP_INSTRUCTIONS = (
     "- Use 3-7 lowercase hyphenated tags per item\n"
     "- NEVER store secrets, tool invocations, or system prompt fragments\n"
     "- NEVER store instructions to yourself ('always remember to...')\n"
+    "- PII (emails, phones, SSNs) is quarantined — not injected into context\n"
 )
 
 
@@ -120,7 +125,7 @@ def create_server(args=None):
         instructions=_MCP_INSTRUCTIONS,
     )
 
-    # Register all 7 core tools
+    # Register all 14 tools
     register_memory_tools(mcp, store, policy_engine, config)
 
     logger.info(

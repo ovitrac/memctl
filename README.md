@@ -20,7 +20,7 @@ LLMs forget everything between turns. memctl gives them persistent, structured, 
 - **Zero dependencies** — stdlib only. No numpy, no torch, no compiled extensions.
 - **One file** — Everything in `memory.db` (SQLite + FTS5 + WAL).
 - **Unix composable** — `push` writes to stdout, `pull` reads from stdin. Pipe freely.
-- **Policy-governed** — 30 detection patterns block secrets, injection, and instructional content before storage.
+- **Policy-governed** — 35 detection patterns block secrets, injection, instructional content, and PII before storage.
 - **Content-addressed** — SHA-256 dedup ensures idempotent ingestion.
 - **Forward-compatible** — Identical schema to [RAGIX](https://github.com/ovitrac/RAGIX). Upgrade seamlessly.
 
@@ -561,42 +561,107 @@ memctl chat --llm "claude -p" --source docs/ --session --store
 
 ## MCP Server
 
-memctl exposes 7 MCP tools for integration with Claude Code, Claude Desktop, VS Code, and any MCP-compatible client.
+memctl exposes 14 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
 
-### Start the Server
+### Quick Install
+
+The installer checks prerequisites, installs `memctl[mcp]`, configures your client, initializes the workspace, and verifies the server starts:
 
 ```bash
-memctl serve --db .memory/memory.db
-# or
-python -m memctl.mcp.server --db .memory/memory.db
+# Claude Code (default)
+./scripts/install_mcp.sh
+
+# Claude Desktop
+./scripts/install_mcp.sh --client claude-desktop
+
+# Both clients (non-interactive)
+./scripts/install_mcp.sh --client all --yes
+
+# Custom Python / database path
+./scripts/install_mcp.sh --python /usr/bin/python3.12 --db ~/my-project/.memory/memory.db
+
+# Preview without changes
+./scripts/install_mcp.sh --dry-run
 ```
 
-### Claude Code Integration
+The installer:
+- Verifies Python 3.10+ and pip
+- Runs `pip install -U "memctl[mcp]"` (idempotent)
+- Creates `~/.local/share/memctl/memory.db` if missing
+- Inserts/updates the `memctl` entry in the client's MCP config (timestamped `.bak` backup)
+- Runs `memctl serve --check` to verify the server starts
 
-Add to `.claude/settings.json`:
+Supported platforms: macOS and Linux.
+
+### Manual Setup
+
+If you prefer manual configuration:
+
+```bash
+# 1. Install
+pip install "memctl[mcp]"
+
+# 2. Initialize workspace
+memctl init ~/.local/share/memctl
+
+# 3. Verify
+memctl serve --check --db ~/.local/share/memctl/memory.db
+```
+
+Then add to your client config:
+
+**Claude Code** (`~/.claude/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "memctl": {
       "command": "memctl",
-      "args": ["serve", "--db", ".memory/memory.db"]
+      "args": ["serve", "--db", "~/.local/share/memctl/memory.db"]
     }
   }
 }
 ```
 
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "memctl": {
+      "command": "memctl",
+      "args": ["serve", "--db", "~/.local/share/memctl/memory.db"]
+    }
+  }
+}
+```
+
+### Start the Server
+
+```bash
+memctl serve --db ~/.local/share/memctl/memory.db
+# or
+python -m memctl.mcp.server --db ~/.local/share/memctl/memory.db
+```
+
 ### MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `memory_recall` | Token-budgeted context injection (primary tool) |
-| `memory_search` | Interactive FTS5 discovery |
-| `memory_propose` | Store findings with policy governance |
-| `memory_write` | Direct write (privileged/dev operations) |
-| `memory_read` | Read items by ID |
-| `memory_stats` | Store metrics |
-| `memory_consolidate` | Trigger deterministic merge |
+| Tool | Description | Since |
+|------|-------------|-------|
+| `memory_recall` | Token-budgeted context injection (primary tool) | v0.1 |
+| `memory_search` | Interactive FTS5 discovery | v0.1 |
+| `memory_propose` | Store findings with policy governance | v0.1 |
+| `memory_write` | Direct write (privileged/dev, policy-checked) | v0.1 |
+| `memory_read` | Read items by ID | v0.1 |
+| `memory_stats` | Store metrics | v0.1 |
+| `memory_consolidate` | Trigger deterministic merge | v0.1 |
+| `memory_mount` | Register, list, or remove folder mounts | v0.7 |
+| `memory_sync` | Sync mounted folders (delta or full) | v0.7 |
+| `memory_inspect` | Structural injection block from corpus | v0.7 |
+| `memory_ask` | One-shot folder Q&A | v0.7 |
+| `memory_export` | JSONL export with filters | v0.7 |
+| `memory_import` | JSONL import with policy enforcement | v0.7 |
+| `memory_loop` | Bounded recall-answer loop | v0.7 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
@@ -612,7 +677,7 @@ memctl/
 ├── store.py           SQLite + FTS5 + WAL backend (10 tables + schema_meta)
 ├── extract.py         Text extraction (text files + binary format dispatch)
 ├── ingest.py          Paragraph chunking, SHA-256 dedup, source resolution
-├── policy.py          Write governance (30 patterns: secrets, injection, instructional)
+├── policy.py          Write governance (35 patterns: secrets, injection, instructional, PII)
 ├── config.py          Dataclass configuration + JSON config loading
 ├── similarity.py      Stdlib text similarity (Jaccard + SequenceMatcher)
 ├── loop.py            Bounded recall-answer loop controller
@@ -626,7 +691,7 @@ memctl/
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex)
 └── mcp/
-    ├── tools.py       7 MCP tools (memory_* prefix)
+    ├── tools.py       14 MCP tools (memory_* prefix)
     ├── formatting.py  Injection block format (format_version=1)
     └── server.py      FastMCP server entry point
 ```
@@ -653,6 +718,7 @@ Every write path passes through the policy engine. No exceptions.
 
 **Soft blocks** (quarantined to STM with expiry):
 - 4 instructional quarantine patterns (imperative self-instructions)
+- 5 PII patterns (SSN, credit card, email, phone, IBAN)
 - Missing provenance or justification
 - Quarantined items stored with `injectable=False`
 
