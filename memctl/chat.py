@@ -16,11 +16,24 @@ Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
 
 from memctl.loop import LoopResult
+
+
+# ---------------------------------------------------------------------------
+# Readline history (XDG-compliant, TTY-only)
+# ---------------------------------------------------------------------------
+
+_HISTORY_DIR = Path(os.environ.get(
+    "XDG_DATA_HOME", os.path.expanduser("~/.local/share")
+)) / "memctl"
+_HISTORY_FILE = _HISTORY_DIR / "chat_history"
+_HISTORY_MAX = 1000
 
 # ---------------------------------------------------------------------------
 # Uncertainty markers (passive protocol hint)
@@ -115,10 +128,13 @@ RecallerType = Callable[[str, str, int], list[dict]]
 LoopRunnerType = Callable[..., LoopResult]
 
 
-def _default_recaller(db_path: str, query: str, limit: int = 50) -> list[dict]:
+def _default_recaller(
+    db_path: str, query: str, limit: int = 50,
+    *, mount_id: Optional[str] = None,
+) -> list[dict]:
     """Default recaller: wraps loop.recall_items."""
     from memctl.loop import recall_items
-    return recall_items(db_path, query, limit)
+    return recall_items(db_path, query, limit, mount_id=mount_id)
 
 
 def _default_loop_runner(**kwargs) -> LoopResult:
@@ -144,6 +160,7 @@ def chat_turn(
     system_prompt: Optional[str] = None,
     llm_mode: str = "stdin",
     timeout: int = 300,
+    mount_id: Optional[str] = None,
     recaller: Optional[RecallerType] = None,
     loop_runner: Optional[LoopRunnerType] = None,
 ) -> str:
@@ -165,6 +182,7 @@ def chat_turn(
         system_prompt: Optional system prompt.
         llm_mode: How to pass prompt to LLM (stdin/file).
         timeout: LLM subprocess timeout in seconds.
+        mount_id: If set, scope recall to this mount's items only.
         recaller: Injectable recall function (for testing).
         loop_runner: Injectable loop function (for testing).
 
@@ -174,8 +192,8 @@ def chat_turn(
     _recaller = recaller or _default_recaller
     _loop_runner = loop_runner or _default_loop_runner
 
-    # 1. Recall from memory store
-    items = _recaller(db_path, question, 50)
+    # 1. Recall from memory store (optionally scoped to mount)
+    items = _recaller(db_path, question, 50, mount_id=mount_id)
 
     # 2. Format recall items as context
     from memctl.loop import merge_context
@@ -293,6 +311,8 @@ def chat_repl(
     timeout: int = 300,
     quiet: bool = False,
     sources: Optional[list[str]] = None,
+    mount_id: Optional[str] = None,
+    readline_history_max: Optional[int] = None,
 ) -> None:
     """Run the interactive chat REPL.
 
@@ -315,6 +335,8 @@ def chat_repl(
         timeout: LLM subprocess timeout.
         quiet: Suppress progress.
         sources: Files to pre-ingest before starting.
+        mount_id: If set, scope recall to this mount's items only.
+        readline_history_max: Max readline history entries (default: 1000).
     """
     from memctl.store import MemoryStore
 
@@ -343,32 +365,74 @@ def chat_repl(
                 file=sys.stderr,
             )
 
-    # Banner
-    if not quiet:
-        print("memctl chat \u2014 Ctrl-D to exit, Ctrl-C to cancel current turn",
-              file=sys.stderr)
-        if session_enabled:
-            print("session: in-memory only (not persisted)", file=sys.stderr)
-
     # Session state
     session = ChatSession() if session_enabled else None
     interactive = sys.stdin.isatty()
 
+    # Readline history (TTY only)
+    history_max = readline_history_max if readline_history_max is not None else _HISTORY_MAX
+    if interactive:
+        try:
+            import readline
+            _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                readline.read_history_file(str(_HISTORY_FILE))
+            except FileNotFoundError:
+                pass
+            readline.set_history_length(history_max)
+        except (ImportError, OSError):
+            pass
+
+    # Banner
+    if not quiet:
+        if interactive:
+            print(
+                "memctl chat \u2014 blank line to send, Ctrl-D to exit, Ctrl-C to cancel",
+                file=sys.stderr,
+            )
+        else:
+            print("memctl chat \u2014 Ctrl-D to exit", file=sys.stderr)
+        if session_enabled:
+            print("session: in-memory only (not persisted)", file=sys.stderr)
+
     # REPL loop
     try:
         while True:
-            try:
-                # Prompt on stderr only if interactive (suppress for piped input)
-                if interactive:
-                    print("> ", end="", file=sys.stderr, flush=True)
-                line = input()
-            except KeyboardInterrupt:
-                print("", file=sys.stderr)
-                continue
-            except EOFError:
-                break
+            # --- Read question ---
+            if interactive:
+                # Multi-line input: blank line terminates
+                print("> ", end="", file=sys.stderr, flush=True)
+                lines: list[str] = []
+                try:
+                    while True:
+                        try:
+                            line = input()
+                        except EOFError:
+                            if lines:
+                                break  # treat accumulated lines as question
+                            raise  # real EOF, exit REPL
+                        if line == "" and lines:
+                            break  # blank line terminates multi-line block
+                        if line == "" and not lines:
+                            continue  # ignore leading blank lines
+                        lines.append(line)
+                        print("  ", end="", file=sys.stderr, flush=True)
+                except KeyboardInterrupt:
+                    print("", file=sys.stderr)
+                    continue
 
-            question = line.strip()
+                question = "\n".join(lines).strip()
+            else:
+                # Piped mode: one line per question (unchanged)
+                try:
+                    line = input()
+                except KeyboardInterrupt:
+                    print("", file=sys.stderr)
+                    continue
+                except EOFError:
+                    break
+                question = line.strip()
+
             if not question:
                 continue
 
@@ -388,6 +452,7 @@ def chat_repl(
                     system_prompt=system_prompt,
                     llm_mode=llm_mode,
                     timeout=timeout,
+                    mount_id=mount_id,
                 )
             except RuntimeError as e:
                 print(f"[chat] LLM error: {e}", file=sys.stderr)
@@ -411,4 +476,11 @@ def chat_repl(
                 session.turn_count += 1
 
     finally:
+        # Save readline history (TTY only)
+        if interactive:
+            try:
+                import readline
+                readline.write_history_file(str(_HISTORY_FILE))
+            except (ImportError, OSError):
+                pass
         store.close()

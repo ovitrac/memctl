@@ -94,12 +94,15 @@ def _safe_size(f: Dict[str, Any]) -> int:
 def inspect_stats(
     db_path: str,
     mount_id: Optional[str] = None,
+    inspect_config: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Compute structural statistics from corpus metadata.
 
     Args:
         db_path: Path to the SQLite database.
         mount_id: Optional mount_id to filter. None = all files.
+        inspect_config: Optional InspectConfig with custom thresholds.
+            If None, uses module-level hardcoded constants.
 
     Returns:
         Dict with total_files, total_chunks, total_size, per_folder,
@@ -165,9 +168,21 @@ def inspect_stats(
         for f in sorted_by_size[:5]
     ]
 
+    # Resolve thresholds: config overrides or module constants
+    if inspect_config is not None:
+        thresholds = {
+            "dominance_frac": inspect_config.dominance_frac,
+            "low_density_threshold": inspect_config.low_density_threshold,
+            "ext_concentration_frac": inspect_config.ext_concentration_frac,
+            "sparse_threshold": inspect_config.sparse_threshold,
+        }
+    else:
+        thresholds = dict(OBSERVATION_THRESHOLDS)
+
     # Observations
     observations = _compute_observations(
         folder_stats, ext_stats, total_chunks, total_files,
+        thresholds=thresholds,
     )
 
     return {
@@ -178,7 +193,7 @@ def inspect_stats(
         "per_extension": dict(ext_stats),
         "top_largest": top_largest,
         "observations": observations,
-        "observation_thresholds": dict(OBSERVATION_THRESHOLDS),
+        "observation_thresholds": thresholds,
     }
 
 
@@ -187,6 +202,8 @@ def _compute_observations(
     ext_stats: Dict[str, int],
     total_chunks: int,
     total_files: int,
+    *,
+    thresholds: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Apply observation rules to computed statistics."""
     obs: List[str] = []
@@ -194,10 +211,17 @@ def _compute_observations(
     if total_chunks == 0 or total_files == 0:
         return obs
 
-    # Dominance: folder with >= 40% of total chunks
+    # Resolve thresholds
+    t = thresholds or OBSERVATION_THRESHOLDS
+    dominance = t.get("dominance_frac", DOMINANCE_FRAC)
+    low_density = t.get("low_density_threshold", LOW_DENSITY_THRESHOLD)
+    ext_conc = t.get("ext_concentration_frac", EXT_CONCENTRATION_FRAC)
+    sparse = t.get("sparse_threshold", SPARSE_THRESHOLD)
+
+    # Dominance: folder with >= dominance_frac of total chunks
     for folder, stats in sorted(folder_stats.items()):
         frac = stats["chunk_count"] / total_chunks if total_chunks > 0 else 0
-        if frac >= DOMINANCE_FRAC:
+        if frac >= dominance:
             pct = int(frac * 100)
             obs.append(f"{folder}/ dominates content ({pct}% of chunks)")
 
@@ -211,7 +235,7 @@ def _compute_observations(
 
         if densities:
             densities.sort(key=lambda x: x[1])
-            threshold_idx = max(1, int(len(densities) * LOW_DENSITY_THRESHOLD))
+            threshold_idx = max(1, int(len(densities) * low_density))
             for folder, density, fc in densities[:threshold_idx]:
                 if fc >= 3:
                     obs.append(
@@ -219,16 +243,16 @@ def _compute_observations(
                         f"({density:.1f} chunks/file, {fc} files)"
                     )
 
-    # Extension concentration: one ext >= 75% of files
+    # Extension concentration: one ext >= ext_concentration_frac of files
     for ext, count in sorted(ext_stats.items(), key=lambda x: -x[1]):
         frac = count / total_files if total_files > 0 else 0
-        if frac >= EXT_CONCENTRATION_FRAC:
+        if frac >= ext_conc:
             pct = int(frac * 100)
             obs.append(f"{ext} files dominate ({pct}% of all files)")
 
-    # Sparse: folders with chunk_count <= 1 and file_count >= 3
+    # Sparse: folders with chunk_count <= sparse_threshold and file_count >= 3
     for folder, stats in sorted(folder_stats.items()):
-        if stats["chunk_count"] <= SPARSE_THRESHOLD and stats["file_count"] >= 3:
+        if stats["chunk_count"] <= sparse and stats["file_count"] >= 3:
             obs.append(
                 f"{folder}/ is sparse "
                 f"({stats['chunk_count']} chunks across {stats['file_count']} files)"

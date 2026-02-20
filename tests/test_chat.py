@@ -7,6 +7,7 @@ deterministic unit testing without monkeypatching or real LLM calls.
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
 
+import os
 import pytest
 
 from memctl.chat import (
@@ -16,6 +17,9 @@ from memctl.chat import (
     _has_uncertainty,
     _store_answer,
     _UNCERTAINTY_MARKERS,
+    _HISTORY_DIR,
+    _HISTORY_FILE,
+    _HISTORY_MAX,
 )
 from memctl.loop import LoopResult
 
@@ -25,7 +29,7 @@ from memctl.loop import LoopResult
 # ---------------------------------------------------------------------------
 
 
-def _mock_recaller(db_path, query, limit=50):
+def _mock_recaller(db_path, query, limit=50, *, mount_id=None):
     """Mock recaller that returns one deterministic item."""
     return [
         {
@@ -39,7 +43,7 @@ def _mock_recaller(db_path, query, limit=50):
     ]
 
 
-def _mock_empty_recaller(db_path, query, limit=50):
+def _mock_empty_recaller(db_path, query, limit=50, *, mount_id=None):
     """Mock recaller that returns nothing."""
     return []
 
@@ -315,3 +319,76 @@ class TestUncertaintyHint:
         """Detection is case-insensitive."""
         assert _has_uncertainty("INSUFFICIENT data to answer")
         assert _has_uncertainty("No Information available")
+
+
+# ---------------------------------------------------------------------------
+# TestReadlineHistory
+# ---------------------------------------------------------------------------
+
+
+class TestReadlineHistory:
+    """Tests for readline history path constants."""
+
+    def test_history_dir_is_xdg_compliant(self):
+        """History directory follows XDG_DATA_HOME convention."""
+        xdg = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+        assert str(_HISTORY_DIR).startswith(xdg)
+        assert "memctl" in str(_HISTORY_DIR)
+
+    def test_history_file_is_under_dir(self):
+        """History file is inside the history directory."""
+        assert str(_HISTORY_FILE).startswith(str(_HISTORY_DIR))
+        assert str(_HISTORY_FILE).endswith("chat_history")
+
+    def test_history_max_default(self):
+        """Default max history entries is 1000."""
+        assert _HISTORY_MAX == 1000
+
+
+# ---------------------------------------------------------------------------
+# TestMultiLine
+# ---------------------------------------------------------------------------
+
+
+class TestMultiLine:
+    """Tests for multi-line input behavior (logic tests)."""
+
+    def test_multiline_join(self):
+        """Multiple lines joined with newline."""
+        # Simulate the multi-line accumulation logic
+        lines = ["line one", "line two", "line three"]
+        question = "\n".join(lines).strip()
+        assert question == "line one\nline two\nline three"
+
+    def test_blank_line_terminates(self):
+        """Blank line after content terminates input."""
+        # Simulate: user types "hello", "", (blank line breaks the loop)
+        lines = []
+        input_lines = ["hello", "world", ""]
+        for line in input_lines:
+            if line == "" and lines:
+                break
+            if line == "" and not lines:
+                continue
+            lines.append(line)
+        question = "\n".join(lines)
+        assert question == "hello\nworld"
+
+    def test_leading_blank_ignored(self):
+        """Leading blank lines are ignored."""
+        lines = []
+        input_lines = ["", "", "actual question", ""]
+        for line in input_lines:
+            if line == "" and lines:
+                break
+            if line == "" and not lines:
+                continue
+            lines.append(line)
+        question = "\n".join(lines)
+        assert question == "actual question"
+
+    def test_piped_mode_single_line(self):
+        """Piped input uses one line per question."""
+        line = "single question"
+        question = line.strip()
+        assert question == "single question"

@@ -13,7 +13,10 @@ Commands:
     memctl mount  <path> [--name N]          — register folder for sync
     memctl sync   [<path>] [--full]          — scan + ingest mounted folders
     memctl inspect [--mount M] [--budget N]  — structural injection block → stdout
+    memctl ask    <path> "Q" --llm CMD       — one-shot folder Q&A
     memctl chat   --llm CMD [--session]      — interactive memory-backed chat
+    memctl export [--tier T] [--type T]      — JSONL export → stdout
+    memctl import [FILE] [--preserve-ids]    — JSONL import from file or stdin
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -139,12 +142,16 @@ def _warn(msg: str) -> None:
 # Default config template for init
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CONFIG_YAML = """\
-# memctl v0.1.0 — config.yaml is reserved for v0.2+
-# CLI reads MEMCTL_* env vars and --flags only.
-store:
-  fts_tokenizer: "{fts}"
-"""
+_DEFAULT_CONFIG_JSON = {
+    "store": {"fts_tokenizer": "fr"},
+    "inspect": {
+        "dominance_frac": 0.40,
+        "low_density_threshold": 0.10,
+        "ext_concentration_frac": 0.75,
+        "sparse_threshold": 1,
+    },
+    "chat": {"history_max": 1000},
+}
 
 
 # ===========================================================================
@@ -181,10 +188,20 @@ def cmd_init(args: argparse.Namespace) -> None:
     store.close()
 
     # Write default config (if absent)
-    config_path = target / "config.yaml"
+    config_path = target / "config.json"
     if not config_path.exists():
+        cfg = dict(_DEFAULT_CONFIG_JSON)
+        cfg["store"]["fts_tokenizer"] = fts
         config_path.write_text(
-            _DEFAULT_CONFIG_YAML.format(fts=fts), encoding="utf-8"
+            json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    # Backward compat: warn if old config.yaml exists
+    old_yaml = target / "config.yaml"
+    if old_yaml.exists():
+        _info(
+            f"[init] Found legacy config.yaml — consider migrating to config.json"
         )
 
     # Write .gitignore (if absent)
@@ -860,8 +877,11 @@ def cmd_inspect(args: argparse.Namespace) -> None:
         mount_id = m["mount_id"]
         mount_label = m.get("name") or m["path"]
 
+    # Pass config thresholds if available
+    inspect_config = getattr(getattr(args, "_config", None), "inspect", None)
+
     if getattr(args, "json", False):
-        stats = inspect_stats(db_path, mount_id=mount_id)
+        stats = inspect_stats(db_path, mount_id=mount_id, inspect_config=inspect_config)
         print(json.dumps(stats, indent=2, ensure_ascii=False))
     else:
         text = inspect_mount(
@@ -871,6 +891,69 @@ def cmd_inspect(args: argparse.Namespace) -> None:
             budget=budget,
         )
         print(text)
+
+
+# ===========================================================================
+# Command: ask  (one-shot folder Q&A)
+# ===========================================================================
+
+
+def cmd_ask(args: argparse.Namespace) -> None:
+    """Answer a question about a folder (one-shot)."""
+    from memctl.ask import ask_folder
+
+    db_path = _resolve_db(args)
+
+    # Resolve system prompt (text or file path)
+    user_system_prompt = None
+    if getattr(args, "system_prompt", None):
+        sp = args.system_prompt
+        if os.path.isfile(sp):
+            with open(sp, "r", encoding="utf-8") as f:
+                user_system_prompt = f.read()
+        else:
+            user_system_prompt = sp
+
+    sync_mode = (
+        "never" if getattr(args, "no_sync", False)
+        else getattr(args, "sync", "auto")
+    )
+
+    try:
+        result = ask_folder(
+            path=args.path,
+            question=args.question,
+            llm_cmd=args.llm,
+            db_path=db_path,
+            sync_mode=sync_mode,
+            mount_mode=getattr(args, "mount_mode", "persist"),
+            budget=_resolve_budget(args),
+            inspect_cap=getattr(args, "inspect_cap", 600),
+            protocol=getattr(args, "protocol", "passive"),
+            max_calls=getattr(args, "max_calls", 1),
+            threshold=getattr(args, "threshold", 0.92),
+            query_threshold=getattr(args, "query_threshold", 0.90),
+            stable_steps=getattr(args, "stable_steps", 2),
+            system_prompt=user_system_prompt,
+            llm_mode=getattr(args, "llm_mode", "stdin"),
+            timeout=getattr(args, "timeout", 300),
+            ignore_patterns=getattr(args, "ignore", None) or None,
+            log=_info,
+        )
+    except (FileNotFoundError, NotADirectoryError) as e:
+        _warn(str(e))
+        sys.exit(1)
+    except ValueError as e:
+        _warn(str(e))
+        sys.exit(1)
+    except RuntimeError as e:
+        _warn(f"[ask] LLM error: {e}")
+        sys.exit(1)
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(result.answer)
 
 
 # ===========================================================================
@@ -898,6 +981,31 @@ def cmd_chat(args: argparse.Namespace) -> None:
     tags_str = getattr(args, "tags", "chat")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()]
 
+    # Handle --folder: auto-mount/sync and get mount_id for scoped recall
+    folder_mount_id = None
+    folder_path = getattr(args, "folder", None)
+    if folder_path:
+        from memctl.inspect import inspect_path
+        sync_mode = (
+            "never" if getattr(args, "no_sync", False)
+            else getattr(args, "sync", "auto")
+        )
+        try:
+            ir = inspect_path(
+                db_path, folder_path,
+                sync_mode=sync_mode,
+                mount_mode="persist",
+                log=_info,
+            )
+            folder_mount_id = ir.mount_id
+        except (FileNotFoundError, NotADirectoryError, ValueError) as e:
+            _warn(f"[chat] Folder error: {e}")
+            sys.exit(1)
+
+    # Config-driven readline history max
+    cfg = getattr(args, "_config", None)
+    history_max = cfg.chat.history_max if cfg else None
+
     chat_repl(
         args.llm,
         db_path=db_path,
@@ -915,7 +1023,74 @@ def cmd_chat(args: argparse.Namespace) -> None:
         timeout=getattr(args, "timeout", 300),
         quiet=getattr(args, "quiet", False),
         sources=getattr(args, "sources", None),
+        mount_id=folder_mount_id,
+        readline_history_max=history_max,
     )
+
+
+# ===========================================================================
+# Command: export  (JSONL export → stdout)
+# ===========================================================================
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    """Export memory items as JSONL to stdout."""
+    from memctl.export_import import export_items
+
+    db_path = _resolve_db(args)
+    include_archived = getattr(args, "include_archived", False)
+
+    count = export_items(
+        db_path,
+        tier=getattr(args, "tier", None),
+        type_filter=getattr(args, "type", None),
+        scope=getattr(args, "scope", None),
+        exclude_archived=not include_archived,
+        log=_info,
+    )
+
+    if getattr(args, "json", False):
+        # Summary to stdout (JSONL already went to stdout, so this is separate)
+        pass  # JSONL output IS the --json mode; no extra summary needed
+
+
+# ===========================================================================
+# Command: import  (JSONL import from file or stdin)
+# ===========================================================================
+
+
+def cmd_import(args: argparse.Namespace) -> None:
+    """Import memory items from JSONL file or stdin."""
+    from memctl.export_import import import_items
+
+    db_path = _resolve_db(args)
+    preserve_ids = getattr(args, "preserve_ids", False)
+    dry_run = getattr(args, "dry_run", False)
+
+    source_path = getattr(args, "file", None)
+    if source_path:
+        source = source_path
+    else:
+        source = sys.stdin
+
+    result = import_items(
+        db_path,
+        source,
+        preserve_ids=preserve_ids,
+        dry_run=dry_run,
+        log=_info,
+    )
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        label = " (dry run)" if dry_run else ""
+        print(f"Import complete{label}:")
+        print(f"  Lines processed: {result.total_lines}")
+        print(f"  Imported:        {result.imported}")
+        print(f"  Skipped (dedup): {result.skipped_dedup}")
+        print(f"  Skipped (policy):{result.skipped_policy}")
+        print(f"  Errors:          {result.errors}")
 
 
 # ===========================================================================
@@ -1010,6 +1185,10 @@ def main() -> None:
     _common.add_argument(
         "-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
         help="Enable verbose logging",
+    )
+    _common.add_argument(
+        "--config", default=argparse.SUPPRESS,
+        help="Path to config.json (default: auto-detect beside database)",
     )
 
     parser = argparse.ArgumentParser(
@@ -1205,6 +1384,55 @@ def main() -> None:
     )
     p_inspect.set_defaults(func=cmd_inspect)
 
+    # -- ask ---------------------------------------------------------------
+    p_ask = sub.add_parser(
+        "ask", parents=[_common],
+        help="One-shot folder Q&A",
+    )
+    p_ask.add_argument("path", help="Folder to ask about")
+    p_ask.add_argument("question", help="Question to answer")
+    p_ask.add_argument("--llm", required=True, help="LLM command (e.g. 'claude -p')")
+    p_ask.add_argument(
+        "--protocol", default="passive", choices=["json", "regex", "passive"],
+        help="LLM output protocol (default: passive)",
+    )
+    p_ask.add_argument("--max-calls", type=int, default=1, help="Max loop iterations")
+    p_ask.add_argument(
+        "--budget", type=int, default=None,
+        help="Total token budget (default: MEMCTL_BUDGET or 2200)",
+    )
+    p_ask.add_argument(
+        "--inspect-cap", type=int, default=600,
+        help="Tokens reserved for structural context (default: 600)",
+    )
+    p_ask.add_argument("--threshold", type=float, default=0.92, help="Answer similarity threshold")
+    p_ask.add_argument("--query-threshold", type=float, default=0.90, help="Query cycle threshold")
+    p_ask.add_argument("--stable-steps", type=int, default=2, help="Stable steps for convergence")
+    p_ask.add_argument(
+        "--sync", default="auto", choices=["auto", "always", "never"],
+        help="Sync mode: auto (default), always, or never",
+    )
+    p_ask.add_argument(
+        "--no-sync", action="store_true", default=False,
+        help="Skip sync (equivalent to --sync=never)",
+    )
+    p_ask.add_argument(
+        "--mount-mode", dest="mount_mode", default="persist",
+        choices=["persist", "ephemeral"],
+        help="Keep mount (persist, default) or remove after (ephemeral)",
+    )
+    p_ask.add_argument(
+        "--ignore", nargs="+", default=None,
+        help="Glob patterns to exclude",
+    )
+    p_ask.add_argument("--system-prompt", default=None, help="System prompt (text or file path)")
+    p_ask.add_argument(
+        "--llm-mode", default="stdin", choices=["stdin", "file"],
+        help="How to pass prompt to LLM",
+    )
+    p_ask.add_argument("--timeout", type=int, default=300, help="LLM subprocess timeout (seconds)")
+    p_ask.set_defaults(func=cmd_ask)
+
     # -- chat --------------------------------------------------------------
     p_chat = sub.add_parser(
         "chat", parents=[_common],
@@ -1233,7 +1461,52 @@ def main() -> None:
         help="How to pass prompt to LLM",
     )
     p_chat.add_argument("--timeout", type=int, default=300, help="LLM subprocess timeout (seconds)")
+    p_chat.add_argument(
+        "--folder", default=argparse.SUPPRESS,
+        help="Scope recall to a folder (auto-mount/sync)",
+    )
+    p_chat.add_argument(
+        "--sync", default="auto", choices=["auto", "always", "never"],
+        help="Sync mode for --folder (default: auto)",
+    )
+    p_chat.add_argument(
+        "--no-sync", action="store_true", default=False,
+        help="Skip sync for --folder (equivalent to --sync=never)",
+    )
     p_chat.set_defaults(func=cmd_chat)
+
+    # -- export ------------------------------------------------------------
+    p_export = sub.add_parser(
+        "export", parents=[_common],
+        help="Export memory items as JSONL to stdout",
+    )
+    p_export.add_argument("--tier", default=None, help="Filter by tier (stm/mtm/ltm)")
+    p_export.add_argument("--type", default=None, help="Filter by type")
+    p_export.add_argument("--scope", default=None, help="Filter by scope")
+    p_export.add_argument(
+        "--include-archived", action="store_true", default=False,
+        help="Include archived items (default: exclude)",
+    )
+    p_export.set_defaults(func=cmd_export)
+
+    # -- import ------------------------------------------------------------
+    p_import = sub.add_parser(
+        "import", parents=[_common],
+        help="Import memory items from JSONL",
+    )
+    p_import.add_argument(
+        "file", nargs="?", default=None,
+        help="JSONL file to import (default: read stdin)",
+    )
+    p_import.add_argument(
+        "--preserve-ids", action="store_true", default=False,
+        help="Keep original item IDs (default: generate new IDs)",
+    )
+    p_import.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Count items without writing",
+    )
+    p_import.set_defaults(func=cmd_import)
 
     # -- serve -------------------------------------------------------------
     p_serve = sub.add_parser("serve", parents=[_common], help="Start MCP server")
@@ -1247,6 +1520,20 @@ def main() -> None:
     args = parser.parse_args()
 
     _quiet = getattr(args, "quiet", False)
+
+    # -- Resolve config file -----------------------------------------------
+    config_path = getattr(args, "config", None)
+    if config_path is None:
+        db_path = _resolve_db(args)
+        candidate = os.path.join(os.path.dirname(os.path.abspath(db_path)), "config.json")
+        if os.path.isfile(candidate):
+            config_path = candidate
+
+    from memctl.config import load_config
+    _config = load_config(config_path)
+
+    # Attach config to args so handlers can access it
+    args._config = _config
 
     if getattr(args, "verbose", False):
         logging.basicConfig(
