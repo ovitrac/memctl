@@ -122,7 +122,19 @@ memctl inspect docs/ --no-sync
 
 `inspect` auto-mounts the folder if needed, checks staleness, syncs only if stale, and produces a structural summary. All implicit actions are announced on stderr.
 
-### 6. Manage
+### 6. Chat with memory-backed context
+
+```bash
+# Interactive chat with any LLM
+memctl chat --llm "claude -p" --session
+
+# With pre-ingested files and answer storage
+memctl chat --llm "ollama run granite3.1:2b" --source docs/ --store --session
+```
+
+Each question recalls from the memory store, sends context + question to the LLM, and displays the answer. `--session` keeps a sliding window of recent Q&A pairs. `--store` persists answers as STM items.
+
+### 7. Manage
 
 ```bash
 memctl show MEM-abc123def456     # Show item details
@@ -155,6 +167,7 @@ memctl <command> [options]
 | `mount PATH` | Register a folder as a structured source |
 | `sync [PATH]` | Delta-sync mounted folders into the store |
 | `inspect [PATH]` | Structural inspection with auto-mount and auto-sync |
+| `chat --llm CMD` | Interactive memory-backed chat REPL |
 | `serve` | Start MCP server (requires `memctl[mcp]`) |
 
 ### Global Flags
@@ -312,6 +325,31 @@ Output includes file/chunk/size totals, per-folder breakdown, per-extension dist
 
 All implicit actions (mount, sync) are announced on stderr. `--quiet` suppresses them.
 
+#### `memctl chat`
+
+```bash
+memctl chat --llm CMD [--session] [--store] [--protocol passive|json|regex]
+            [--max-calls N] [--budget N] [--source FILE ...] [--quiet]
+```
+
+Interactive memory-backed chat REPL. Each turn: FTS5 recall from the memory store, send context + question to the LLM, display the answer.
+
+**Stateless by default.** Each question sees only the memory store — no hidden conversation state.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--llm CMD` | *(required)* | LLM command (e.g. `"claude -p"`, `"ollama run granite3.1:2b"`) |
+| `--protocol` | `passive` | LLM output protocol. `passive` = single-pass; `json` = iterative refinement |
+| `--max-calls` | `1` | Max loop iterations per turn |
+| `--session` | off | Enable in-memory session context (sliding window of recent Q&A) |
+| `--history-turns` | `5` | Session window size (turns) |
+| `--session-budget` | `4000` | Session block character limit |
+| `--store` | off | Persist each answer as STM item |
+| `--source FILE...` | *(none)* | Pre-ingest files before starting |
+| `--tags` | `chat` | Tags for stored items (comma-separated) |
+
+**stdout purity:** answers go to stdout only. Prompt, banner, and hints go to stderr.
+
 ---
 
 ## Environment Variables
@@ -378,6 +416,9 @@ memctl inspect src/ --json | jq '.extensions'
 
 # Inspect without syncing (use cached state)
 memctl inspect docs/ --no-sync --json
+
+# Interactive chat with pre-ingested docs
+memctl chat --llm "claude -p" --source docs/ --session --store
 ```
 
 ---
@@ -442,7 +483,8 @@ memctl/
 ├── mount.py           Folder mount registration and management
 ├── sync.py            Delta sync with 3-tier change detection
 ├── inspect.py         Structural inspection and orchestration
-├── cli.py             12 CLI commands
+├── chat.py            Interactive memory-backed chat REPL
+├── cli.py             13 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex)
 └── mcp/
@@ -451,7 +493,7 @@ memctl/
     └── server.py      FastMCP server entry point
 ```
 
-19 source files. ~7,300 lines. Zero compiled dependencies for core.
+20 source files. ~7,700 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -610,7 +652,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-479 tests across 14 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, forward compatibility, contracts, CLI (subprocess), and pipe composition.
+492 tests across 15 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, chat, forward compatibility, contracts, CLI (subprocess), and pipe composition.
 
 ---
 

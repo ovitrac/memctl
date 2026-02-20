@@ -7,6 +7,28 @@ Versioning follows [SemVer](https://semver.org/spec/v2.0.0.html) from v1.0.
 
 ---
 
+## [0.4.0] - 2026-02-20
+
+Interactive memory-backed chat REPL.
+
+### Added
+
+- **Chat REPL** (`chat.py`): Interactive memory-backed chat via `memctl chat --llm CMD`. Each turn: FTS5 recall → LLM → display. Stateless by default. Options: `--session` (in-memory sliding window), `--store` (persist answers as STM), `--session-budget` (bound session context), `--history-turns`, `--protocol`, `--max-calls`, `--source` (pre-ingest).
+- **Passive protocol default**: Chat defaults to `passive` (single-pass, no refinement). Opt into iterative refinement with `--protocol json --max-calls 3`.
+- **Uncertainty hint**: When passive mode detects hedging markers in the answer, a one-line tip on stderr suggests enabling iterative refinement. No behavior change — just discoverability.
+- **Session dual bounds**: `--history-turns` (turn count) and `--session-budget` (character budget) together prevent runaway context growth. Oldest turns trimmed first.
+- **Injectable architecture**: `chat_turn()` accepts `recaller` and `loop_runner` callables for zero-monkeypatch unit testing.
+- **Test suite** expanded to 492 tests across 15 files (+18 tests: 16 chat unit, 2 CLI chat).
+
+### Design Decisions
+
+- **stdout purity**: Answers go to stdout only. Prompt, banner, hints, and errors go to stderr. Chat output is pipeable.
+- **No per-turn ingestion**: `--source` is pre-ingest only. Per-turn auto-ingestion deferred — hidden state changes, variable latency, token blow-up.
+- **In-memory session**: `--session` is ephemeral (not persisted). Durable state requires explicit `--store`. Persistence is opt-in because durable state must be auditable, tagged, and policy-governed.
+- **CLI: 13 commands** (was 12). New: `chat`.
+
+---
+
 ## [0.3.0] - 2026-02-20
 
 Folder mount, structural sync, and inspection — three new commands.

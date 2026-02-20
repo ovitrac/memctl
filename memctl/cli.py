@@ -13,6 +13,7 @@ Commands:
     memctl mount  <path> [--name N]          — register folder for sync
     memctl sync   [<path>] [--full]          — scan + ingest mounted folders
     memctl inspect [--mount M] [--budget N]  — structural injection block → stdout
+    memctl chat   --llm CMD [--session]      — interactive memory-backed chat
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -873,6 +874,51 @@ def cmd_inspect(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: chat  (interactive memory-backed REPL)
+# ===========================================================================
+
+
+def cmd_chat(args: argparse.Namespace) -> None:
+    """Run the interactive memory-backed chat REPL."""
+    from memctl.chat import chat_repl
+
+    db_path = _resolve_db(args)
+
+    # Resolve system prompt (text or file path)
+    user_system_prompt = None
+    if getattr(args, "system_prompt", None):
+        sp = args.system_prompt
+        if os.path.isfile(sp):
+            with open(sp, "r", encoding="utf-8") as f:
+                user_system_prompt = f.read()
+        else:
+            user_system_prompt = sp
+
+    # Parse tags
+    tags_str = getattr(args, "tags", "chat")
+    tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+
+    chat_repl(
+        args.llm,
+        db_path=db_path,
+        store_answers=getattr(args, "store", False),
+        session_enabled=getattr(args, "session", False),
+        history_turns=getattr(args, "history_turns", 5),
+        session_budget=getattr(args, "session_budget", 4000),
+        budget=_resolve_budget(args),
+        tags=tags,
+        protocol=getattr(args, "protocol", "passive"),
+        max_calls=getattr(args, "max_calls", 1),
+        threshold=getattr(args, "threshold", 0.92),
+        system_prompt=user_system_prompt,
+        llm_mode=getattr(args, "llm_mode", "stdin"),
+        timeout=getattr(args, "timeout", 300),
+        quiet=getattr(args, "quiet", False),
+        sources=getattr(args, "sources", None),
+    )
+
+
+# ===========================================================================
 # Command: serve  (start MCP server)
 # ===========================================================================
 
@@ -1158,6 +1204,36 @@ def main() -> None:
         help="Glob patterns to exclude when auto-mounting",
     )
     p_inspect.set_defaults(func=cmd_inspect)
+
+    # -- chat --------------------------------------------------------------
+    p_chat = sub.add_parser(
+        "chat", parents=[_common],
+        help="Interactive memory-backed chat",
+    )
+    p_chat.add_argument("--llm", required=True, help="LLM command (e.g. 'claude -p')")
+    p_chat.add_argument(
+        "--protocol", default="passive", choices=["json", "regex", "passive"],
+        help="LLM output protocol (default: passive)",
+    )
+    p_chat.add_argument("--max-calls", type=int, default=1, help="Max loop iterations per turn")
+    p_chat.add_argument("--threshold", type=float, default=0.92, help="Answer similarity threshold")
+    p_chat.add_argument(
+        "--budget", type=int, default=_env_int("MEMCTL_BUDGET", 2200),
+        help="Token budget for recall context",
+    )
+    p_chat.add_argument("--store", action="store_true", help="Persist each answer as STM item")
+    p_chat.add_argument("--session", action="store_true", help="Enable in-memory session context")
+    p_chat.add_argument("--history-turns", type=int, default=5, help="Session window size (turns)")
+    p_chat.add_argument("--session-budget", type=int, default=4000, help="Session block char limit")
+    p_chat.add_argument("--tags", default="chat", help="Tags for stored items (comma-separated)")
+    p_chat.add_argument("--source", nargs="+", dest="sources", help="Pre-ingest files")
+    p_chat.add_argument("--system-prompt", default=None, help="System prompt (text or file path)")
+    p_chat.add_argument(
+        "--llm-mode", default="stdin", choices=["stdin", "file"],
+        help="How to pass prompt to LLM",
+    )
+    p_chat.add_argument("--timeout", type=int, default=300, help="LLM subprocess timeout (seconds)")
+    p_chat.set_defaults(func=cmd_chat)
 
     # -- serve -------------------------------------------------------------
     p_serve = sub.add_parser("serve", parents=[_common], help="Start MCP server")

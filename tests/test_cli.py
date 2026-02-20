@@ -1,5 +1,5 @@
 """
-Tests for memctl CLI — all 12 commands via subprocess.
+Tests for memctl CLI — all 13 commands via subprocess.
 
 Every test exercises the real binary (`python -m memctl.cli`) against a
 temporary SQLite database so there are no side-effects on the developer
@@ -735,3 +735,39 @@ class TestInspectCLI:
         r2 = run(["mount", "--list", "--json", "--db", db, "-q"])
         mounts = json.loads(r2.stdout)
         assert not any(m["mount_id"] == data["mount_id"] for m in mounts)
+
+
+# ---------------------------------------------------------------------------
+# chat
+# ---------------------------------------------------------------------------
+
+
+class TestChatCLI:
+    """Subprocess tests for `memctl chat`."""
+
+    def test_chat_help(self):
+        """chat --help shows expected flags."""
+        r = run(["chat", "--help"])
+        assert r.returncode == 0
+        for flag in ["--llm", "--session", "--store", "--session-budget",
+                      "--protocol", "--history-turns"]:
+            assert flag in r.stdout, f"Missing flag {flag} in help output"
+
+    def test_chat_scripted_session(self, populated_db, tmp_path):
+        """Scripted stdin session with echo returns deterministic output."""
+        # Use 'echo' as a trivial LLM: it just echoes stdin back
+        # chat_turn sends the full prompt to the LLM, so stdout will
+        # contain whatever echo produces.
+        # Pipe a single question then EOF.
+        r = subprocess.run(
+            CLI + ["chat", "--llm", "cat", "--protocol", "passive",
+                   "--db", populated_db, "-q"],
+            input="What is the architecture?\n",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # cat echoes the full prompt (context + question) as the answer
+        # The key test: exit code 0 and non-empty stdout
+        assert r.returncode == 0
+        assert len(r.stdout.strip()) > 0
