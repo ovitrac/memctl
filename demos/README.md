@@ -14,6 +14,12 @@ bash demos/must_have_demo.sh
 # Tier 2: Loop + consolidation (60s, uses bundled mock LLM)
 bash demos/advanced_demo.sh
 
+# Chat REPL demo (mock LLM, multi-turn conversation)
+bash demos/chat_demo.sh
+
+# eco mode: structural retrieval on the full codebase (~8s)
+bash demos/eco_demo.sh
+
 # Full 10-act showcase (comprehensive, optional LLM integration)
 bash demos/run_demo.sh --no-llm --keep
 ```
@@ -96,6 +102,38 @@ bash demos/run_demo.sh --model mistral:latest --budget 3000 # custom model
 bash demos/run_demo.sh --interactive --no-llm               # pause between acts
 ```
 
+### Chat Demo: `chat_demo.sh` — Interactive Chat REPL
+
+Demonstrates the interactive memory-backed chat REPL with a mock LLM.
+
+| Step | What It Proves |
+|------|----------------|
+| 1/3 | Workspace init + corpus ingestion |
+| 2/3 | Multi-turn chat with context recall per turn |
+| 3/3 | Chat answers stored as STM items |
+
+```bash
+bash demos/chat_demo.sh
+```
+
+### eco Mode Demo: `eco_demo.sh` — Deterministic Structural Retrieval
+
+**The wahoo demo.** Proves that eco mode finds architecture that native file browsing misses. Runs on the full memctl codebase (~120 files, 243 chunks, 1.4 MB).
+
+| Act | Title | Key Moment |
+|-----|-------|------------|
+| 1/4 | The Hard Question | Native: 5 file reads, ~7,700 tokens, misses test invariants |
+| 2/4 | eco ON | 3 tool calls, ~4,600 tokens, surfaces M1/M2/M3 from test files |
+| 3/4 | FTS Discipline | NL query → 0 results; identifier → 9 results, deep chunk |
+| 4/4 | Persistence | Same query, instant recall, zero re-exploration |
+
+```bash
+bash demos/eco_demo.sh                  # full 4-act demo
+bash demos/eco_demo.sh --act 2          # run only Act 2
+bash demos/eco_demo.sh --corpus PATH    # use custom corpus
+bash demos/eco_demo.sh --keep           # preserve workspace
+```
+
 ### Loop-Specific Demo: `run_loop_demo.sh` — 3-Act LLM Loop Demo
 
 Dedicated demo for the `memctl loop` command with three LLM backends.
@@ -130,23 +168,26 @@ Optional (for `run_demo.sh` Act 9 and `run_loop_demo.sh` Acts 2-3):
 
 ```
 demos/
-├── _demo_lib.sh           Shared helpers (colors, logging, workspace, capability detection)
-├── must_have_demo.sh       Tier 1: launch demo (5 properties, ~30s)
-├── advanced_demo.sh        Tier 2: loop + consolidation (4 steps, ~60s)
-├── run_demo.sh             Full 10-act showcase
-├── run_loop_demo.sh        Loop-specific demo (3 LLM backends)
-├── mock_llm.sh             Deterministic mock LLM (3-iteration state machine)
-├── README.md               This file
-├── corpus-mini/            Minimal corpus for Tier 1 (3 files, ~600 bytes)
-│   ├── architecture.md     Microservices, event sourcing
-│   ├── security.md         JWT, RBAC, encryption
-│   └── database.md         PostgreSQL, migrations, indexing
-└── corpus/                 Full corpus for Tier 2 and showcase (6 files)
-    ├── architecture.md     Microservices, event sourcing, gRPC, Kubernetes
-    ├── security.md         JWT, RBAC, OWASP Top 10, encryption, audit
-    ├── database.md         PostgreSQL, migrations, indexing, partitioning
-    ├── conception.md       (FR) Authentification, chiffrement, RGPD
-    ├── api_gateway.md      Token validation, rate limiting, error handling
+├── _demo_lib.sh            Shared helpers (colors, logging, workspace, capability detection)
+├── must_have_demo.sh        Tier 1: launch demo (5 properties, ~30s)
+├── advanced_demo.sh         Tier 2: loop + consolidation (6 steps, ~60s)
+├── chat_demo.sh             Chat REPL demo (mock LLM, 3 steps)
+├── eco_demo.sh              eco mode demo (4 acts, full codebase)
+├── run_demo.sh              Full 10-act showcase
+├── run_loop_demo.sh         Loop-specific demo (3 LLM backends)
+├── mock_llm.sh              Deterministic mock LLM (3-iteration state machine)
+├── mock_chat_llm.sh         Deterministic mock LLM for chat REPL
+├── README.md                This file
+├── corpus-mini/             Minimal corpus for Tier 1 (3 files, ~600 bytes)
+│   ├── architecture.md      Microservices, event sourcing
+│   ├── security.md          JWT, RBAC, encryption
+│   └── database.md          PostgreSQL, migrations, indexing
+└── corpus/                  Full corpus for Tier 2 and showcase (6 files)
+    ├── architecture.md      Microservices, event sourcing, gRPC, Kubernetes
+    ├── security.md          JWT, RBAC, OWASP Top 10, encryption, audit
+    ├── database.md          PostgreSQL, migrations, indexing, partitioning
+    ├── conception.md        (FR) Authentification, chiffrement, RGPD
+    ├── api_gateway.md       Token validation, rate limiting, error handling
     └── session_management.md  Token lifecycle, concurrent sessions
 ```
 
@@ -164,7 +205,7 @@ memctl takes a radically simpler path:
 
 - **One file** — All memory lives in a single SQLite file. No server to run. Copy it, back it up, git-track it. It's just a file.
 - **Unix pipes** — `memctl push` writes injection blocks to stdout. `memctl pull` reads from stdin. Any LLM CLI, any shell script, any cron job can compose with it.
-- **Policy engine** — 30 detection patterns block secrets and prompt injection *before* they reach storage. Your memory can never be weaponized against your own LLM.
+- **Policy engine** — 35 detection patterns block secrets and prompt injection *before* they reach storage. Your memory can never be weaponized against your own LLM.
 - **Content addressing** — Every file and every memory item is SHA-256 hashed. Ingesting the same file twice is a no-op. Safe in automated pipelines.
 - **Audit trail** — Every write, every read, every merge creates an immutable event. You can prove what your LLM knew, when, and why.
 - **Bounded loops** — The LLM can ask for more context, but memctl controls the loop: maximum iterations, cycle detection, convergence stopping. The LLM proposes. memctl decides.
@@ -186,7 +227,7 @@ memctl takes a radically simpler path:
 | Storage | Single SQLite file | Cloud service / vector DB |
 | API | Unix pipes (stdin/stdout) | REST API / SDK |
 | Dependencies | Zero (stdlib only) | numpy, FAISS, torch, ... |
-| Security | 30 detection patterns, hard-reject secrets | Trust the user |
+| Security | 35 detection patterns, hard-reject secrets | Trust the user |
 | Audit | Every operation traced | Varies |
 | Idempotency | SHA-256 content addressing | Varies |
 | LLM calls | Zero (deterministic) | Often required |

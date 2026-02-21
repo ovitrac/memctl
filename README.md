@@ -701,6 +701,46 @@ memctl serve --db memory.db --no-rate-limit
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
+### eco mode (v0.9)
+
+Native Claude reads files. eco Claude queries architecture.
+
+eco mode replaces sequential file browsing with deterministic structural retrieval
+and persistent cross-file reasoning. Surgical chunk retrieval (exact algorithm, not
+file header), cross-file invariant discovery (architecture in tests), bounded cost
+(~5x token reduction).
+
+**One-shot install:**
+
+```bash
+pip install "memctl[mcp]"
+./scripts/install_eco.sh --db-root .memory
+```
+
+This sets up:
+- MCP server with project-scoped memory (`.memory/memory.db`)
+- Hook that reminds Claude to prefer `memory_inspect` and `memory_recall` (~50 tokens/turn)
+- Strategy file (`.claude/eco/ECO.md`) with the escalation ladder + FTS5 query discipline
+- `/eco` slash command for live toggle (`/eco on`, `/eco off`, `/eco status`)
+
+**The escalation ladder:**
+
+1. `memory_inspect` — structural overview (file tree, sizes, observations)
+2. `memory_recall` — selective content retrieval (FTS5, token-budgeted)
+3. `memory_loop` — iterative refinement (bounded, convergence-detecting)
+4. Native `Read`/`View` — last resort for editing or line-level precision
+
+eco mode is advisory for retrieval, not restrictive for editing.
+
+**Demo:** `bash demos/eco_demo.sh` — 4-act demo on the full codebase.
+
+**Uninstall:**
+
+```bash
+./scripts/uninstall_eco.sh
+# Removes hook + strategy file. Preserves .memory/memory.db and MCP config.
+```
+
 ---
 
 ## How It Works

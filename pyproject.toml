@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memctl"
-version = "0.8.0"
+version = "0.9.0"
 description = "A Unix-native memory control plane for LLM orchestration"
 authors = [
     {name = "Olivier Vitrac", email = "olivier.vitrac@adservio.fr"}

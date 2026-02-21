@@ -4,6 +4,74 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] — 2026-02-21
+
+### Added
+
+**eco mode — Token-efficient file exploration for Claude Code**
+
+- `extras/eco/ECO.md` — behavioral strategy file: guiding principle, escalation ladder,
+  FTS5 query discipline, tool usage rules, fallback boundaries. Ladder first, tools
+  subordinate. Includes explicit FTS5 AND-logic rules: prefer 2-3 keywords, prefer
+  identifiers (function/class/constant names), avoid natural language sentences.
+- `extras/eco/eco-hint.sh` — `UserPromptSubmit` hook template (~50 tokens per turn).
+  Conditional on `.claude/eco/.disabled` flag file (single syscall, O(1)).
+  Default: ON (no flag file = enabled). Toggleable at runtime via `/eco` command.
+- `extras/eco/eco.md` — `/eco` slash command template (on|off|status toggle).
+- `extras/eco/README.md` — eco mode documentation, CloakMCP parallel, install/uninstall.
+
+**One-shot installer (`scripts/install_eco.sh`)**
+
+- Single command sets up everything: MCP server, eco hook, strategy file, .gitignore.
+- Verifies `memctl[mcp]` is installed (fails with clear hint if not).
+- Registers MCP server with `--db-root .memory` (project-scoped).
+- Installs eco hook to `.claude/hooks/eco-hint.sh` (merges with existing hooks).
+- Installs strategy file to `.claude/eco/ECO.md`.
+- Installs `/eco` slash command to `.claude/commands/eco.md`.
+- Validates server startup (`memctl serve --check`).
+- Adds `.memory/` to `.gitignore` (idempotent).
+- Reports extraction capabilities (informational, non-blocking):
+  docx, pdf, xlsx, pptx, odt, ods, odp with OK/MISSING status.
+- Options: `--db-root PATH`, `--dry-run`, `--yes`, `--force`.
+
+**Clean removal (`scripts/uninstall_eco.sh`)**
+
+- Removes eco hook, strategy file, and `/eco` slash command.
+- Removes `UserPromptSubmit` hook registration from settings.
+- Never deletes `.memory/memory.db` (user data), MCP server config, or safety hooks.
+- Options: `--dry-run`.
+
+**WAHOO demo (`demos/eco_demo.sh`)**
+
+- 4-act scripted demo on the full memctl codebase (~120 files, 243 chunks, 1.4 MB).
+- Act 1: native exploration — 5 file reads, ~7,700 tokens, misses test invariants.
+- Act 2: eco mode — 3 tool calls, ~4,600 tokens, surfaces M1/M2/M3 from test files.
+- Act 3: FTS discipline — natural-language query → 0 results; identifier → 9 results.
+- Act 4: persistence — same query, instant recall, zero re-exploration.
+- Self-excluding: `eco_demo.sh` is ignored during ingestion to avoid self-referential hits.
+- Options: `--act N`, `--corpus PATH`, `--keep`.
+
+### Design Decisions
+
+- **eco is advisory, not restrictive**: eco mode steers Claude toward token-efficient
+  retrieval. It does not block native Read/View for editing or line-level operations.
+- **Hook is static**: No dynamic stats, no subprocess calls, no latency. ~50 tokens,
+  deterministic, impossible to break.
+- **Escalation ladder is foundational**: ECO.md puts the decision hierarchy (inspect →
+  recall → loop → fallback) before individual tool descriptions, ensuring Claude
+  internalizes the constraint topology before learning tool specifics.
+- **Project-scoped memory**: Default `--db-root .memory` keeps knowledge collocated with
+  the codebase, gitignored, per-project isolation.
+- **No new MCP tools**: eco mode leverages the existing 14 tools. No core code changes.
+- **Product identity**: eco is deterministic structural retrieval + persistent cross-file
+  reasoning — not "smarter Claude". Strongest wins are surgical chunk retrieval (deep
+  implementation, not file headers), cross-file invariant discovery (architecture in tests),
+  and bounded cost (~5x token reduction, credible and measurable).
+- **FTS5 discipline is the interface**: keyword queries succeed, natural language fails.
+  This is by design — eco rewards precision.
+
+---
+
 ## [0.8.0] — 2026-02-20
 
 ### Added
