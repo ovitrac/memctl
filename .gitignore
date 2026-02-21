@@ -223,3 +223,4 @@ base/
 
 # memctl eco mode — memory database
 .memory/
+.playground/

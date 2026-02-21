@@ -668,8 +668,15 @@ class MemoryStore:
         FTS5 query syntax: terms joined with AND, e.g. ``term1 AND term2``.
         Special FTS5 characters in user input are escaped to prevent syntax
         errors.
+
+        Stop-word normalization is applied automatically: French and English
+        stop words are stripped unless the query consists entirely of stop
+        words (in which case the original query is preserved).
         """
-        terms = query.strip().split()
+        from memctl.query import normalize_query
+
+        normalized = normalize_query(query)
+        terms = normalized.strip().split()
         if not terms:
             return self.list_items(
                 tier=tier, type_filter=type_filter, scope=scope,

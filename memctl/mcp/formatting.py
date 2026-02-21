@@ -188,6 +188,57 @@ def parse_injection_block(text: str) -> Dict[str, Any]:
     }
 
 
+def format_combined_prompt(
+    user_question: str,
+    inject_block: str,
+    mode_hint: str = "",
+) -> str:
+    """Format a combined prompt with clear structural separation.
+
+    The user question MUST remain the dominant signal.  The injection
+    block is reference material only — Claude should use it to inform
+    answers but never let it override the user's actual intent.
+
+    Args:
+        user_question: The original user question, preserved verbatim.
+        inject_block: The formatted injection block (from format_injection_block
+                      or inspect_mount).  May be empty.
+        mode_hint: Optional mode classification ("exploration" or "modification").
+
+    Returns:
+        Combined prompt string with explicit structural markers.
+    """
+    parts: list[str] = []
+
+    # ── User question (dominant signal) ──
+    parts.append("## User Question (answer THIS — do not modify or reinterpret)")
+    parts.append(user_question)
+
+    # ── Mode hint ──
+    if mode_hint:
+        if mode_hint == "exploration":
+            parts.append("")
+            parts.append(
+                "Mode: exploration — answer using the context below. "
+                "Do not read or edit files unless context is insufficient."
+            )
+        elif mode_hint == "modification":
+            parts.append("")
+            parts.append(
+                "Mode: modification — use context below to identify WHICH file "
+                "and WHERE, then use native Read for current content and Edit to modify. "
+                "Never edit using chunk content (it may be stale)."
+            )
+
+    # ── Injected context (reference only) ──
+    if inject_block and inject_block.strip():
+        parts.append("")
+        parts.append("## Additional Context (from memctl — use as reference only)")
+        parts.append(inject_block)
+
+    return "\n".join(parts)
+
+
 def format_search_results(
     items: List[Dict[str, Any]],
     query: str = "",

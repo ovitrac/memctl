@@ -4,6 +4,103 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] — 2026-02-21
+
+### Added
+
+**Injection integrity & query resilience (Phase 0)**
+
+- `memctl/query.py` — new module: FTS stop-word stripping (`normalize_query`), intent
+  classification (`classify_mode`), and budget suggestion (`suggest_budget`). French +
+  English stop words, question words, identifier preservation (CamelCase, snake_case,
+  UPPER_CASE, dotted paths). Zero-dependency, stdlib-only.
+- `format_combined_prompt()` in `memctl/mcp/formatting.py` — structural separation of
+  user question and injected context. User question always first with explicit "answer
+  THIS" marker. Injection block marked as "reference only". Optional mode hints
+  (exploration/modification).
+- Query-length hints in `memory_recall` and `memory_search` MCP tools: when queries
+  exceed 4 words, suggests the normalized form.
+- Zero-result guidance: when recall/search returns 0 hits, returns actionable hints
+  (use identifiers, remove articles, try inspect first).
+- Stop-word normalization integrated into `store.search_fulltext()` — benefits both
+  CLI and MCP paths transparently.
+
+**ECO.md hardening (Phase 2)**
+
+- Complete ECO.md rewrite (359 lines): all 8 required sections present.
+- Mode Classification Protocol: Exploration-first vs Modification-first with explicit
+  verb-based classification rules. References `classify_mode()` as automated.
+- Injection Budget Guidelines: budget proportional to question length (600-1500 tokens).
+  References `suggest_budget()` as automated.
+- Escalation Ladder: formalized with automatic stop-word normalization at L2.
+  Recovery sequence documented with concrete examples.
+- FTS5 Query Discipline: unicode61 no-stemming limitations documented
+  (inflection, singular/plural, AND logic). Good and bad query examples with
+  explanations of why bad queries fail and how to fix them.
+- Bypass Decision Tree: updated to reflect automatic stop-word stripping.
+- Critical Rules: never edit from chunks, never let injection override user question.
+- "Why eco is OFF by default" section.
+- Programmatic API section: `normalize_query()`, `classify_mode()`, `suggest_budget()`
+  with usage examples.
+- Generic query examples only (no customer-specific content).
+
+**Escalation ladder tests (Phase 1)**
+
+- `tests/test_escalation_ladder.py` — 32 tests: L1 inspect (structural overview), L2
+  recall with NL normalization (7 English + 1 French NL query, identifiers, keyword pairs),
+  query hints and zero-result guidance, scope/tier filtering, non-degradation guards,
+  FTS5 limitation documentation (inflection, cross-item, singular/plural), 20-query
+  recovery rate matrix (85% prediction accuracy, 100% identifier/keyword, 60%+ NL).
+
+**Tests (~109 new)**
+
+- `tests/test_query_normalization.py` — 42 tests: stop-word stripping, identifier
+  detection, mode classification, budget suggestion.
+- `tests/test_injection_integrity.py` — 20 tests: combined prompt structure, budget
+  enforcement, marker preservation, unicode support.
+- `tests/test_mode_classification.py` — 15 tests: 10-scenario matrix (5 exploration +
+  5 modification) plus edge cases (mixed intent, French, bare identifiers).
+- `tests/test_escalation_ladder.py` — 32 tests: full escalation ladder validation
+  (L1 inspect, L2 recall/search, guidance, filtering, recovery rates).
+
+**Pilot guidance (Phase 3)**
+
+- `extras/eco/PILOT.md` — generic pilot framework for evaluating eco mode with
+  development teams. Recommended pilot size (20-30 developers, 2-4 weeks),
+  30-minute training outline (4 modules), metrics to collect (5 KPIs with targets),
+  exit criteria (5 conditions), rollout/failure guidance.
+
+**Documentation & branding (Phase 4)**
+
+- `QUICKSTART.md` — general quickstart guide: install, first memory, ingest a codebase,
+  ask questions, MCP server setup, eco mode overview, environment variables, FAQ (8 entries),
+  troubleshooting (10-row table), next steps.
+- `ECO_QUICKSTART.md` — eco mode guide for Claude Code users: first session walkthrough,
+  intent classification, escalation ladder, query tips, 5 session workflow patterns,
+  binary format superpowers, CloakMCP coexistence, FAQ (7 entries), troubleshooting.
+- `README.md` restyled: centered logo + title + tagline header, 7 shield.io badges
+  (License, Python, Version, Tests, MCP, DeepWiki, Code style), navigation menu,
+  Documentation section (7-document table), Links section, footer with quote.
+- `assets/memctl-logo.png` — project logo (owl mascot with eco/FTS5/STM references).
+
+### Changed
+
+- `store.search_fulltext()` now applies `normalize_query()` before FTS — French and
+  English stop words stripped automatically. Existing keyword queries unchanged.
+- `extras/eco/ECO.md` hardened rewrite (Phase 2): FTS5 no-stemming limitations,
+  automatic normalization at L2, recovery examples, programmatic API section.
+- `README.md` updated: eco section reflects OFF-by-default, query normalization,
+  pilot guidance link. Architecture list includes `query.py`. Test count: 859.
+
+### Design decisions
+
+- Stop-word stripping, not embeddings: covers 80% of NL failure cases without dependencies.
+- Budget proportional to question length: prevents intent distortion at the source.
+- Mode classification via verbs: deterministic, no ML needed, Claude follows explicit rules.
+- eco default OFF: first impressions determine adoption; untrained users must opt in.
+- eco is a behavioral layer, not a mandatory runtime.
+- No customer-specific content in public documentation.
+
 ## [0.9.0] — 2026-02-21
 
 ### Added

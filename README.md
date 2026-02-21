@@ -1,19 +1,31 @@
+<div align="center">
+<p align="center">
+  <img src="assets/memctl-logo.png" alt="memctl Logo" height="128"><br>
+</p>
+
 # memctl
 
-**A Unix-native memory control plane for LLM orchestration.**
+### One file, one truth. Memory for your LLMs.
 
-One file, one truth. Ingest files, recall with FTS5, pipe into any LLM.
+**A Unix-native memory control plane for LLM orchestration — zero dependencies, policy-governed, MCP-native**
 
-```
-pip install memctl
-memctl init
-memctl push "project architecture" --source src/ | llm "Summarize the architecture"
-echo "The architecture uses event sourcing" | memctl pull --tags arch
-```
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-0.10.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-859%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-14%20tools-blueviolet.svg)](#mcp-server)
+[![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+[Why memctl](#why-memctl) • [Quick Start](QUICKSTART.md) • [eco for Claude Code](ECO_QUICKSTART.md) • [Installation](#installation) • [CLI Reference](#cli-reference) • [MCP Server](#mcp-server) • [How It Works](#how-it-works)
+
+</div>
 
 ---
 
 ## Why memctl?
+
+> **New to memctl?** See the full [Quickstart Guide](QUICKSTART.md) with FAQ, compatibility matrix, and troubleshooting.
 
 LLMs forget everything between turns. memctl gives them persistent, structured, policy-governed memory backed by a single SQLite file.
 
@@ -701,7 +713,10 @@ memctl serve --db memory.db --no-rate-limit
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
-### eco mode (v0.9)
+### eco mode (v0.9+)
+
+> **Using Claude Code?** See the [eco Mode Quickstart](ECO_QUICKSTART.md) for a hands-on
+> walkthrough — install, first session, query tips, workflow patterns, and troubleshooting.
 
 Native Claude reads files. eco Claude queries architecture.
 
@@ -710,11 +725,15 @@ and persistent cross-file reasoning. Surgical chunk retrieval (exact algorithm, 
 file header), cross-file invariant discovery (architecture in tests), bounded cost
 (~5x token reduction).
 
+**eco is OFF by default.** It is installable but disabled until explicitly enabled.
+This prevents the "0 results" first-impression problem with untrained users.
+
 **One-shot install:**
 
 ```bash
 pip install "memctl[mcp]"
 ./scripts/install_eco.sh --db-root .memory
+memctl eco on    # Enable eco mode (required)
 ```
 
 This sets up:
@@ -731,6 +750,16 @@ This sets up:
 4. Native `Read`/`View` — last resort for editing or line-level precision
 
 eco mode is advisory for retrieval, not restrictive for editing.
+
+**Query normalization (v0.10):** Stop words (French + English articles, prepositions,
+question words) are stripped automatically before FTS search. Code identifiers
+(CamelCase, snake_case, UPPER_CASE) are always preserved. This means natural language
+questions like "how does the incident escalation workflow work" are automatically
+reduced to "incident escalation workflow" for better recall.
+
+**Pilot guidance:** See [`extras/eco/PILOT.md`](extras/eco/PILOT.md) for a generic
+framework to evaluate eco mode with a development team (20-30 developers, 2-4 weeks,
+metrics, exit criteria).
 
 **Demo:** `bash demos/eco_demo.sh` — 4-act demo on the full codebase.
 
@@ -762,6 +791,7 @@ memctl/
 ├── inspect.py         Structural inspection and orchestration
 ├── chat.py            Interactive chat REPL (readline history, multi-line)
 ├── ask.py             One-shot folder Q&A orchestrator
+├── query.py           FTS query normalization and intent classification
 ├── export_import.py   JSONL export/import with policy enforcement
 ├── cli.py             16 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
@@ -772,7 +802,7 @@ memctl/
     └── server.py      FastMCP server entry point
 ```
 
-22 source files. ~8,500 lines. Zero compiled dependencies for core.
+23 source files. ~8,700 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -932,7 +962,21 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-544 tests across 18 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), and pipe composition.
+859 tests across 22 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, and escalation ladder.
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[`README.md`](README.md)** | This file — overview, CLI reference, MCP server, architecture |
+| **[`QUICKSTART.md`](QUICKSTART.md)** | General quickstart: install, first memory, ingest, ask, MCP setup, FAQ |
+| **[`ECO_QUICKSTART.md`](ECO_QUICKSTART.md)** | eco mode for Claude Code: first session, query tips, workflow patterns, binary formats |
+| **[`CHANGELOG.md`](CHANGELOG.md)** | Full release history (Keep a Changelog format) |
+| **[`extras/eco/ECO.md`](extras/eco/ECO.md)** | eco behavioral strategy (installed at `.claude/eco/ECO.md`) |
+| **[`extras/eco/PILOT.md`](extras/eco/PILOT.md)** | Pilot guidance for team evaluation (20-30 developers, 2-4 weeks) |
+| **[`extras/eco/README.md`](extras/eco/README.md)** | eco mode technical overview and installation reference |
 
 ---
 
@@ -943,3 +987,23 @@ MIT License. See [LICENSE](LICENSE) for details.
 ---
 
 **Author:** Olivier Vitrac, PhD, HDR | [olivier.vitrac@adservio.fr](mailto:olivier.vitrac@adservio.fr) | Adservio Innovation Lab
+
+---
+
+## Links
+
+- **Repository**: https://github.com/ovitrac/memctl
+- **PyPI**: https://pypi.org/project/memctl/
+- **Issues**: https://github.com/ovitrac/memctl/issues
+- **Documentation**: [DeepWiki](https://deepwiki.com/ovitrac/memctl)
+- **License**: [MIT](./LICENSE)
+
+---
+
+<div align="center">
+
+*"Every line of code should earn its place. When in doubt, leave it out."*
+
+**[Back to Top](#memctl)**
+
+</div>

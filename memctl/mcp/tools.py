@@ -35,10 +35,12 @@ from memctl.config import MemoryConfig
 from memctl.consolidate import ConsolidationPipeline
 from memctl.mcp.formatting import (
     FORMAT_VERSION,
+    format_combined_prompt,
     format_injection_block,
     format_search_results,
 )
 from memctl.policy import MemoryPolicy
+from memctl.query import classify_mode, normalize_query, suggest_budget
 from memctl.store import MemoryStore
 from memctl.types import MemoryItem, MemoryProposal, MemoryProvenance
 
@@ -155,7 +157,7 @@ def register_memory_tools(
 
             detail = {"query_len": len(query), "matched": len(enriched), "tokens": tokens_used}
 
-            return {
+            result: Dict[str, Any] = {
                 "status": "ok",
                 "inject_text": inject_text,
                 "items": catalog,
@@ -163,6 +165,27 @@ def register_memory_tools(
                 "matched": len(enriched),
                 "format_version": FORMAT_VERSION,
             }
+
+            # Query-length hint (eco guardrail)
+            query_words = query.strip().split()
+            if len(query_words) > 4:
+                normalized = normalize_query(query)
+                if normalized != query:
+                    result["hint"] = (
+                        "FTS works best with 2-3 keywords. "
+                        f"Try: '{normalized}' instead of full sentences."
+                    )
+
+            # Zero-result guidance (eco guardrail)
+            if not enriched:
+                result["hint"] = (
+                    "No results found. Try:\n"
+                    "1. Use class/method names instead of descriptions\n"
+                    "2. Remove articles and prepositions\n"
+                    "3. Use 'memory_inspect' to see the folder structure first"
+                )
+
+            return result
 
         except RateLimitExceeded as e:
             outcome = "rate_limited"
@@ -242,11 +265,32 @@ def register_memory_tools(
 
             detail = {"query_len": len(query), "results": len(results)}
 
-            return {
+            search_result: Dict[str, Any] = {
                 "status": "ok",
                 "count": len(results),
                 "items": results,
             }
+
+            # Query-length hint (eco guardrail)
+            query_words = query.strip().split()
+            if len(query_words) > 4:
+                normalized = normalize_query(query)
+                if normalized != query:
+                    search_result["hint"] = (
+                        "FTS works best with 2-3 keywords. "
+                        f"Try: '{normalized}' instead of full sentences."
+                    )
+
+            # Zero-result guidance (eco guardrail)
+            if not results:
+                search_result["hint"] = (
+                    "No results found. Try:\n"
+                    "1. Use class/method names instead of descriptions\n"
+                    "2. Remove articles and prepositions\n"
+                    "3. Use 'memory_inspect' to see the folder structure first"
+                )
+
+            return search_result
 
         except RateLimitExceeded as e:
             outcome = "rate_limited"
