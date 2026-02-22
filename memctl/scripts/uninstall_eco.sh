@@ -156,7 +156,7 @@ if 'UserPromptSubmit' in hooks:
     before = len(hooks['UserPromptSubmit'])
     hooks['UserPromptSubmit'] = [
         e for e in hooks['UserPromptSubmit']
-        if 'eco-hint' not in e.get('command', '')
+        if 'eco-hint' not in json.dumps(e)
     ]
     after = len(hooks['UserPromptSubmit'])
     if after < before:

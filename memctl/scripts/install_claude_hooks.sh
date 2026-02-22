@@ -102,16 +102,16 @@ if 'hooks' not in config:
 
 # PreToolUse
 pre = config['hooks'].get('PreToolUse', [])
-guard_entry = {'type': 'command', 'command': guard_path}
+guard_entry = {'hooks': [{'type': 'command', 'command': guard_path}]}
 # Remove existing memctl guard entries
-pre = [e for e in pre if 'memctl_safety_guard' not in e.get('command', '')]
+pre = [e for e in pre if 'memctl_safety_guard' not in json.dumps(e)]
 pre.append(guard_entry)
 config['hooks']['PreToolUse'] = pre
 
 # PostToolUse
 post = config['hooks'].get('PostToolUse', [])
-logger_entry = {'type': 'command', 'command': logger_path}
-post = [e for e in post if 'memctl_audit_logger' not in e.get('command', '')]
+logger_entry = {'hooks': [{'type': 'command', 'command': logger_path}]}
+post = [e for e in post if 'memctl_audit_logger' not in json.dumps(e)]
 post.append(logger_entry)
 config['hooks']['PostToolUse'] = post
 

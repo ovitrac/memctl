@@ -306,9 +306,10 @@ if 'hooks' not in config:
 
 # UserPromptSubmit — add eco-hint, preserve existing hooks
 hooks_list = config['hooks'].get('UserPromptSubmit', [])
-eco_entry = {'type': 'command', 'command': hook_path}
+eco_entry = {'hooks': [{'type': 'command', 'command': hook_path}]}
 # Remove previous eco-hint entries (idempotent)
-hooks_list = [e for e in hooks_list if 'eco-hint' not in e.get('command', '')]
+hooks_list = [e for e in hooks_list
+              if 'eco-hint' not in json.dumps(e)]
 hooks_list.append(eco_entry)
 config['hooks']['UserPromptSubmit'] = hooks_list
 

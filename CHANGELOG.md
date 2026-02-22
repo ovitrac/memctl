@@ -4,6 +4,17 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.4] — 2026-02-22
+
+### Fixed
+
+- **Hooks schema format**: all 4 hook scripts wrote bare entries
+  (`{"type": "command", ...}`) instead of the required Claude Code wrapper format
+  (`{"hooks": [{"type": "command", ...}]}`). Fixed in `install_eco.sh`
+  (UserPromptSubmit), `install_claude_hooks.sh` (PreToolUse, PostToolUse),
+  `uninstall_eco.sh`, and `uninstall_mcp.sh`. Uninstallers now use
+  `json.dumps(e)` for matching so they clean up both old and new entry formats.
+
 ## [0.12.3] — 2026-02-22
 
 ### Fixed

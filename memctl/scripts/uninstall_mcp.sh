@@ -132,7 +132,7 @@ if remove_hooks and 'hooks' in config:
             before = len(config['hooks'][event])
             config['hooks'][event] = [
                 e for e in config['hooks'][event]
-                if 'memctl_' not in e.get('command', '')
+                if 'memctl_' not in json.dumps(e)
             ]
             after = len(config['hooks'][event])
             if after < before:
