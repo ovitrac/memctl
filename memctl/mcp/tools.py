@@ -145,17 +145,31 @@ def register_memory_tools(
             # Build dicts for formatting
             enriched = [_item_to_format_dict(it) for it in injectable]
 
+            # FTS cascade metadata (v0.11)
+            meta = store._last_search_meta
+
             inject_text = format_injection_block(
                 enriched,
                 budget_tokens=budget_tokens,
                 total_matched=len(enriched),
                 injection_type="memory_recall",
+                fts_strategy=meta.strategy if meta else None,
+                fts_dropped_terms=meta.dropped_terms if meta else None,
             )
 
             catalog = format_search_results(enriched, query=query)
             tokens_used = len(inject_text) // 4 if inject_text else 0
 
             detail = {"query_len": len(query), "matched": len(enriched), "tokens": tokens_used}
+            fts_info: Dict[str, Any] = {}
+            if meta:
+                fts_info = {
+                    "fts_strategy": meta.strategy,
+                    "fts_original_terms": meta.original_terms,
+                    "fts_effective_terms": meta.effective_terms,
+                    "fts_dropped_terms": meta.dropped_terms,
+                }
+                detail["fts_strategy"] = meta.strategy
 
             result: Dict[str, Any] = {
                 "status": "ok",
@@ -164,6 +178,7 @@ def register_memory_tools(
                 "tokens_used": tokens_used,
                 "matched": len(enriched),
                 "format_version": FORMAT_VERSION,
+                **fts_info,
             }
 
             # Query-length hint (eco guardrail)
@@ -178,8 +193,14 @@ def register_memory_tools(
 
             # Zero-result guidance (eco guardrail)
             if not enriched:
+                strategy_note = ""
+                if meta and meta.strategy != "AND":
+                    strategy_note = (
+                        f" (tried cascade: {meta.strategy}, "
+                        f"dropped: {meta.dropped_terms})"
+                    )
                 result["hint"] = (
-                    "No results found. Try:\n"
+                    f"No results found{strategy_note}. Try:\n"
                     "1. Use class/method names instead of descriptions\n"
                     "2. Remove articles and prepositions\n"
                     "3. Use 'memory_inspect' to see the folder structure first"
@@ -265,10 +286,23 @@ def register_memory_tools(
 
             detail = {"query_len": len(query), "results": len(results)}
 
+            # FTS cascade metadata (v0.11)
+            meta = store._last_search_meta
+            fts_info: Dict[str, Any] = {}
+            if meta:
+                fts_info = {
+                    "fts_strategy": meta.strategy,
+                    "fts_original_terms": meta.original_terms,
+                    "fts_effective_terms": meta.effective_terms,
+                    "fts_dropped_terms": meta.dropped_terms,
+                }
+                detail["fts_strategy"] = meta.strategy
+
             search_result: Dict[str, Any] = {
                 "status": "ok",
                 "count": len(results),
                 "items": results,
+                **fts_info,
             }
 
             # Query-length hint (eco guardrail)
@@ -283,8 +317,14 @@ def register_memory_tools(
 
             # Zero-result guidance (eco guardrail)
             if not results:
+                strategy_note = ""
+                if meta and meta.strategy != "AND":
+                    strategy_note = (
+                        f" (tried cascade: {meta.strategy}, "
+                        f"dropped: {meta.dropped_terms})"
+                    )
                 search_result["hint"] = (
-                    "No results found. Try:\n"
+                    f"No results found{strategy_note}. Try:\n"
                     "1. Use class/method names instead of descriptions\n"
                     "2. Remove articles and prepositions\n"
                     "3. Use 'memory_inspect' to see the folder structure first"

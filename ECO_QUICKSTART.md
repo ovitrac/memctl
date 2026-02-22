@@ -1,6 +1,6 @@
 # eco Mode Quickstart — Claude Code Edition
 
-**Version**: 0.10.0 | **Time to first eco session: ~5 minutes**
+**Version**: 0.11.0 | **Time to first eco session: ~5 minutes**
 
 eco mode replaces Claude's sequential file browsing with deterministic structural
 retrieval and persistent cross-file reasoning. Same questions, better answers, fewer
@@ -235,11 +235,16 @@ security authentication      → finds auth-related classes
 Redis caching                → finds caching strategy
 ```
 
-**Natural language (since v0.10.0):** Stop words are stripped automatically.
+**Natural language (since v0.10.0+):** Stop words are stripped automatically.
+Since v0.11.0, a cascade (AND → REDUCED_AND → OR) auto-recovers when strict AND fails.
 
 ```
 "what is the incident escalation workflow"
-  → normalized to: "incident escalation workflow"  → match
+  → normalized: "incident escalation workflow"  → AND match
+
+"what REST conventions do the endpoints follow"
+  → AND miss → REDUCED_AND("REST conventions endpoints"): match
+  → fts_strategy: REDUCED_AND
 ```
 
 ### What does not work
@@ -535,4 +540,4 @@ SQLite with FTS5 is very space-efficient.
 
 ---
 
-*memctl v0.10.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.11.0 — Olivier Vitrac, Adservio Innovation Lab*

@@ -31,6 +31,7 @@ from memctl.types import (
     MemoryItem,
     MemoryLink,
     MemoryProvenance,
+    SearchMeta,
     _generate_id,
     _now_iso,
     content_hash,
@@ -267,6 +268,33 @@ def _unpack_vector(data: bytes, dim: int) -> List[float]:
 
 
 # ---------------------------------------------------------------------------
+# Search helpers (module-level)
+# ---------------------------------------------------------------------------
+
+def _rank_by_coverage(
+    items: List[MemoryItem], terms: List[str],
+) -> List[MemoryItem]:
+    """Rank items by how many query terms they contain.
+
+    Used after OR-fallback to recover precision. Deterministic scoring:
+    score = number of query terms found in item content (case-insensitive).
+
+    Tie-breaking: Python's sorted() is stable, so items with equal coverage
+    preserve their original FTS5 rank order (BM25).
+
+    Complexity: O(N*M) where N = len(items), M = len(terms). Trivial at
+    typical sizes (limit=10, terms<=5).
+    """
+    lower_terms = [t.lower() for t in terms]
+
+    def score(item: MemoryItem) -> int:
+        text = ((item.title or "") + " " + (item.content or "")).lower()
+        return sum(1 for t in lower_terms if t in text)
+
+    return sorted(items, key=lambda x: -score(x))
+
+
+# ---------------------------------------------------------------------------
 # MemoryStore
 # ---------------------------------------------------------------------------
 
@@ -297,6 +325,7 @@ class MemoryStore:
         self._lock = threading.Lock()
         self._fts5_available: bool = False
         self._fts_tokenizer = fts_tokenizer or "unicode61 remove_diacritics 2"
+        self._last_search_meta: Optional[SearchMeta] = None
         self._conn = sqlite3.connect(
             db_path, check_same_thread=False,
             detect_types=sqlite3.PARSE_DECLTYPES,
@@ -657,50 +686,89 @@ class MemoryStore:
         limit: int = 100,
     ) -> List[MemoryItem]:
         """
-        Full-text search with FTS5 acceleration and LIKE fallback.
+        Full-text search with FTS5 cascade and LIKE fallback.
 
-        Strategy:
-            1. If FTS5 is available, use ``memory_items_fts MATCH`` for ranking.
-            2. On any FTS5 error (syntax, missing table), fall back to LIKE.
-            3. LIKE fallback: each whitespace-delimited term must appear in
-               title OR content OR tags (AND logic).
+        Strategy (v0.11 cascade):
+            1. Normalize query (strip stop words).
+            2. If FTS5 available, run cascade:
+               AND(all) → REDUCED_AND(N-1) → ... → AND(1) → OR(all)
+            3. On any FTS5 error, fall back to LIKE.
 
-        FTS5 query syntax: terms joined with AND, e.g. ``term1 AND term2``.
-        Special FTS5 characters in user input are escaped to prevent syntax
-        errors.
+        The cascade is deterministic and auditable. Search metadata is
+        stored in ``self._last_search_meta`` for callers who need it
+        (MCP tools, audit trail). This preserves backward compatibility.
 
         Stop-word normalization is applied automatically: French and English
         stop words are stripped unless the query consists entirely of stop
         words (in which case the original query is preserved).
         """
-        from memctl.query import normalize_query
+        from memctl.query import cascade_query, normalize_query
 
         normalized = normalize_query(query)
         terms = normalized.strip().split()
         if not terms:
+            self._last_search_meta = SearchMeta(
+                strategy="AND", original_terms=[], effective_terms=[],
+                dropped_terms=[], total_candidates=0,
+            )
             return self.list_items(
                 tier=tier, type_filter=type_filter, scope=scope,
                 corpus_id=corpus_id, exclude_archived=exclude_archived,
                 limit=limit,
             )
 
+        # Common filter kwargs for all FTS methods
+        fts_kw = dict(
+            tier=tier, type_filter=type_filter, scope=scope,
+            corpus_id=corpus_id, exclude_archived=exclude_archived,
+            limit=limit,
+        )
+
         if self._fts5_available:
             try:
-                return self._search_fts5(
-                    terms, tier=tier, type_filter=type_filter,
-                    scope=scope, corpus_id=corpus_id,
-                    exclude_archived=exclude_archived, limit=limit,
-                )
-            except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
-                logger.warning(f"FTS5 search failed, falling back to LIKE: {exc}")
+                # Build closures for the cascade
+                def and_fn(t: List[str]) -> List[MemoryItem]:
+                    return self._search_fts5_and(t, **fts_kw)
 
-        return self._search_like(
+                def or_fn(t: List[str]) -> List[MemoryItem]:
+                    return self._search_fts5_or(t, **fts_kw)
+
+                results, strategy, effective, dropped = cascade_query(
+                    terms, and_fn, or_fn,
+                )
+
+                # OR results need coverage ranking
+                if strategy == "OR_FALLBACK" and results:
+                    results = _rank_by_coverage(results, terms)
+                    if limit:
+                        results = results[:limit]
+
+                self._last_search_meta = SearchMeta(
+                    strategy=strategy,
+                    original_terms=list(terms),
+                    effective_terms=effective,
+                    dropped_terms=dropped,
+                    total_candidates=len(results),
+                )
+                return results
+
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+                logger.warning("FTS5 cascade failed, falling back to LIKE: %s", exc)
+
+        # LIKE fallback (unchanged)
+        results = self._search_like(
             terms, tier=tier, type_filter=type_filter,
             scope=scope, corpus_id=corpus_id,
             exclude_archived=exclude_archived, limit=limit,
         )
+        self._last_search_meta = SearchMeta(
+            strategy="LIKE", original_terms=list(terms),
+            effective_terms=list(terms), dropped_terms=[],
+            total_candidates=len(results),
+        )
+        return results
 
-    def _search_fts5(
+    def _search_fts5_and(
         self,
         terms: List[str],
         tier: Optional[str] = None,
@@ -710,15 +778,46 @@ class MemoryStore:
         exclude_archived: bool = True,
         limit: int = 100,
     ) -> List[MemoryItem]:
-        """
-        FTS5 MATCH search. Must be called within _fts5_available guard.
+        """FTS5 AND search — all terms must co-occur in one item."""
+        escaped = ['"' + t.replace('"', '""') + '"' for t in terms]
+        fts_query = " AND ".join(escaped)
+        return self._search_fts5_raw(
+            fts_query, tier=tier, type_filter=type_filter,
+            scope=scope, corpus_id=corpus_id,
+            exclude_archived=exclude_archived, limit=limit,
+        )
 
-        Escapes double-quotes in terms to prevent FTS5 syntax errors, then
-        joins terms with AND for conjunctive matching across title, content,
-        tags, and entities columns.
-        """
+    def _search_fts5_or(
+        self,
+        terms: List[str],
+        tier: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        scope: Optional[str] = None,
+        corpus_id: Optional[str] = None,
+        exclude_archived: bool = True,
+        limit: int = 100,
+    ) -> List[MemoryItem]:
+        """FTS5 OR search — any term matches. Results need coverage ranking."""
+        escaped = ['"' + t.replace('"', '""') + '"' for t in terms]
+        fts_query = " OR ".join(escaped)
+        return self._search_fts5_raw(
+            fts_query, tier=tier, type_filter=type_filter,
+            scope=scope, corpus_id=corpus_id,
+            exclude_archived=exclude_archived, limit=limit,
+        )
+
+    def _search_fts5_raw(
+        self,
+        fts_query: str,
+        tier: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        scope: Optional[str] = None,
+        corpus_id: Optional[str] = None,
+        exclude_archived: bool = True,
+        limit: int = 100,
+    ) -> List[MemoryItem]:
+        """Execute a raw FTS5 MATCH query with filters."""
         with self._lock:
-            # Build filter conditions on the main table
             conditions: list = []
             params: list = []
             if exclude_archived:
@@ -736,9 +835,6 @@ class MemoryStore:
                 conditions.append("i.corpus_id=?")
                 params.append(corpus_id)
 
-            # Escape FTS5 special characters: wrap each term in double quotes
-            escaped = ['"' + t.replace('"', '""') + '"' for t in terms]
-            fts_query = " AND ".join(escaped)
             conditions.append("memory_items_fts MATCH ?")
             params.append(fts_query)
 

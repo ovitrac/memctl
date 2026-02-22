@@ -11,8 +11,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.10.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-859%20passing-brightgreen.svg)](./tests)
+[![Version](https://img.shields.io/badge/version-0.11.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-919%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-14%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -753,9 +753,12 @@ eco mode is advisory for retrieval, not restrictive for editing.
 
 **Query normalization (v0.10):** Stop words (French + English articles, prepositions,
 question words) are stripped automatically before FTS search. Code identifiers
-(CamelCase, snake_case, UPPER_CASE) are always preserved. This means natural language
-questions like "how does the incident escalation workflow work" are automatically
-reduced to "incident escalation workflow" for better recall.
+(CamelCase, snake_case, UPPER_CASE) are always preserved.
+
+**FTS cascade (v0.11):** When a multi-term query returns 0 results, the system
+automatically cascades: AND(all) → REDUCED_AND(N-1) → ... → OR(all). Each step is
+logged and the strategy (`fts_strategy`) is reported in MCP responses. Benchmark on
+enterprise Java codebases: multi-term hit rate 40%→100%, NL hit rate 0%→95%.
 
 **Pilot guidance:** See [`extras/eco/PILOT.md`](extras/eco/PILOT.md) for a generic
 framework to evaluate eco mode with a development team (20-30 developers, 2-4 weeks,

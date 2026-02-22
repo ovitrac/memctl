@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Literal, Optional
 # ---------------------------------------------------------------------------
 
 MemoryTier = Literal["stm", "mtm", "ltm"]
+SearchStrategy = Literal["AND", "REDUCED_AND", "OR_FALLBACK", "LIKE"]
 MemoryType = Literal[
     "fact", "decision", "definition", "constraint",
     "pattern", "todo", "pointer", "note",
@@ -323,3 +324,26 @@ class CorpusMetadata:
         """Deserialize corpus metadata from a dictionary."""
         known = set(cls.__dataclass_fields__.keys())
         return cls(**{k: v for k, v in d.items() if k in known})
+
+
+# ---------------------------------------------------------------------------
+# Search Metadata (v0.11: FTS cascade)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SearchMeta:
+    """Metadata about how a search query was resolved.
+
+    Tracks the FTS cascade strategy used: AND → REDUCED_AND → OR_FALLBACK → LIKE.
+    Advisory only — callers who don't need this can ignore it.
+    """
+
+    strategy: SearchStrategy = "AND"
+    original_terms: List[str] = field(default_factory=list)
+    effective_terms: List[str] = field(default_factory=list)
+    dropped_terms: List[str] = field(default_factory=list)
+    total_candidates: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for MCP responses and audit."""
+        return asdict(self)

@@ -7,7 +7,7 @@ Policy-governed, content-addressed, and forward-compatible with RAGIX.
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 from memctl.types import (
     MemoryItem,
@@ -16,6 +16,8 @@ from memctl.types import (
     MemoryLink,
     MemoryProvenance,
     CorpusMetadata,
+    SearchMeta,
+    SearchStrategy,
 )
 from memctl.store import MemoryStore, SCHEMA_VERSION
 from memctl.policy import MemoryPolicy
@@ -29,6 +31,8 @@ __all__ = [
     "MemoryLink",
     "MemoryProvenance",
     "CorpusMetadata",
+    "SearchMeta",
+    "SearchStrategy",
     "MemoryStore",
     "MemoryPolicy",
     "MemoryConfig",

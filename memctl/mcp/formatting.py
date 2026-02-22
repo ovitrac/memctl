@@ -26,6 +26,8 @@ def format_injection_block(
     budget_tokens: int = 1500,
     total_matched: Optional[int] = None,
     injection_type: str = "memory_recall",
+    fts_strategy: Optional[str] = None,
+    fts_dropped_terms: Optional[List[str]] = None,
 ) -> str:
     """
     Render a list of scored memory items into the stable injection format.
@@ -38,6 +40,8 @@ def format_injection_block(
         budget_tokens: Requested token budget.
         total_matched: Total items matching query (before budget truncation).
         injection_type: "memory_recall" or "session_inject".
+        fts_strategy: Search strategy used (AND/REDUCED_AND/OR_FALLBACK/LIKE).
+        fts_dropped_terms: Terms dropped during cascade (if any).
 
     Returns:
         Formatted injection block string.
@@ -55,6 +59,13 @@ def format_injection_block(
     lines.append(f"generated_at: {now_iso}")
     lines.append(f"budget_tokens: {budget_tokens}")
     lines.append(f"matched: {matched}")
+
+    # Strategy hint when cascade did not use strict AND
+    if fts_strategy and fts_strategy != "AND":
+        hint = f"fts_strategy: {fts_strategy}"
+        if fts_dropped_terms:
+            hint += f" (dropped: {', '.join(fts_dropped_terms)})"
+        lines.append(hint)
 
     # Estimate tokens used (rough: 1 token ~ 4 chars)
     char_budget = budget_tokens * 4

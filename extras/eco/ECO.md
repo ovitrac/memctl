@@ -15,11 +15,11 @@ memctl remains usable as a plain CLI without Claude hooks.
 ## Why eco is OFF by default
 
 eco changes Claude's behavior via context injection. Making it default ON creates
-the perception that memctl is "intrusive." The main failure mode is natural language
-queries returning 0 results (FTS5 AND logic) — a first-impression killer at scale.
+the perception that memctl is "intrusive." Since v0.11.0, the FTS cascade mitigates
+the main failure mode (NL queries returning 0 results), but eco still changes
+behavioral expectations — opt-in is the safer adoption path.
 
-Opt-in with a clear enable step (`memctl eco on` or `/eco on`) is the safer
-adoption path. See the wahoo demo (`demos/eco_demo.sh`) for a 60-second showcase.
+See the wahoo demo (`demos/eco_demo.sh`) for a 60-second showcase.
 
 ---
 
@@ -113,10 +113,14 @@ actionable recovery hints (use identifiers, remove ambiguous terms, try inspect)
 
 ### Recovery sequence when recall returns 0
 
-1. **Remove the broadest term** — keep only identifiers and domain nouns.
+Since v0.11.0, the cascade already attempts term reduction and OR fallback
+automatically. If you still get 0 results after cascade, it means no indexed
+item contains any of your query terms. Recovery steps:
+
+1. **Check `fts_strategy`** — if it's `OR_FALLBACK`, the cascade tried everything.
 2. **Try the function/class name directly** — `IncidentServiceImpl` > `incident service`.
-3. **Scope to a subfolder** — restrict search to the relevant directory.
-4. **Split into two narrower queries** — one per concept.
+3. **Check inflection** — use the exact word form from the codebase (no stemming).
+4. **Scope to a subfolder** — restrict search to the relevant directory.
 5. **Escalate to `memory_loop`** — structured iterative refinement.
 6. **Only then** fall back to native `Read` on the specific file identified.
 
@@ -124,35 +128,70 @@ actionable recovery hints (use identifiers, remove ambiguous terms, try inspect)
 
 ## FTS5 Query Discipline
 
-memctl uses SQLite FTS5 full-text search with **AND logic**.
-Every term in the query must match within a single item. Natural language
-sentences over-constrain and return nothing.
-
-Stop words are stripped automatically (v0.10.0+), but fewer terms is still better.
+memctl uses SQLite FTS5 full-text search. Stop words are stripped
+automatically (v0.10.0+), and queries benefit from a deterministic cascade
+(v0.11.0+) that improves recall without sacrificing explainability.
 
 ### Rules
 
 1. **Use 2-3 precise keywords**, not sentences.
 2. **Prefer identifiers** — function names, class names, variable names, constants.
-3. **Avoid natural language** — stop words are stripped, but remaining terms must all match.
-4. **Split broad questions** into two narrow queries.
+3. **Avoid inflected forms** — use base forms from the codebase (see Stemming below).
+4. **Split broad questions** into two narrow queries when possible.
 
-### FTS5 tokenizer: unicode61 (no stemming)
+### FTS Cascade Behavior (v0.11.0)
+
+When a multi-term query returns 0 results, the system automatically cascades:
+
+```
+AND(all terms)  →  REDUCED_AND(N-1)  →  ...  →  AND(1 term)  →  OR(all terms)
+```
+
+Each step is logged and the strategy is reported in MCP responses via `fts_strategy`.
+
+| Strategy | When | Precision | What it means |
+|----------|------|-----------|---------------|
+| `AND` | All terms matched in one chunk | Highest | Exact match — all terms co-occur |
+| `REDUCED_AND` | Some terms were dropped | Medium | Context is narrower than requested — check `fts_dropped_terms` |
+| `OR_FALLBACK` | Any term matches, ranked by coverage | Lower | Broad match — review results for relevance |
+| `LIKE` | FTS5 unavailable | Variable | Substring matching — no ranking |
+
+**Reading the strategy in MCP responses:**
+```json
+{
+  "fts_strategy": "REDUCED_AND",
+  "fts_original_terms": ["REST", "endpoints"],
+  "fts_effective_terms": ["REST"],
+  "fts_dropped_terms": ["endpoints"]
+}
+```
+
+**When to escalate after cascade:**
+- `AND` → trust the results.
+- `REDUCED_AND` → results are valid but narrower. If insufficient, try a different query.
+- `OR_FALLBACK` → results may include loosely related items. Review before acting.
+  If relevance is poor, escalate to `memory_loop` or native `Read`.
+
+The cascade runs automatically — no manual intervention needed. The old advice
+"narrow your query" still applies for best results, but the system now recovers
+gracefully instead of returning empty.
+
+### Stemming Limitations
 
 memctl's default tokenizer (`unicode61 remove_diacritics 2`) does NOT perform
-Porter stemming. This has practical implications:
+Porter stemming. This means inflected forms do not match:
 
 | Behavior | Example | Result |
 |----------|---------|--------|
 | Case-insensitive | "Incident" matches "incident" | Match |
 | Diacritics normalized | "créer" matches "creer" | Match |
-| **No inflection matching** | "monitored" vs "Monitoring" | **No match** |
+| **No inflection** | "monitored" vs "Monitoring" | **No match** |
 | **No singular/plural** | "notification" vs "notifications" | **No match** |
-| **AND logic** | All terms must be in ONE item | No cross-item |
 
-This is the correct trade-off: deterministic FTS5 with no dependencies vs.
-embedding-based search requiring FAISS/Ollama. When exact forms don't match,
-use the identifier (class/method name) instead of a description.
+**Workaround:** Use the exact form from the codebase, or the identifier:
+- "configuration" not "configured"
+- "monitor" not "monitored"
+- `NotificationServiceImpl` not "notification system"
 
 ### Good queries
 
@@ -174,39 +213,39 @@ Redis caching                 → finds caching strategy
 Kubernetes deployment         → finds deployment manifests
 ```
 
-**NL queries after automatic normalization (v0.10.0+):**
+**NL queries after normalization + cascade (v0.11.0):**
 ```
 "what is the incident escalation workflow"
-  → normalized: "incident escalation workflow"   → match
-
-"what authentication Spring Security uses"
-  → normalized: "authentication Spring Security uses"   → match
+  → normalized: "incident escalation workflow"
+  → AND: match (all terms co-occur)
 
 "what REST conventions do the endpoints follow"
-  → normalized: "REST conventions endpoints follow"   → match
-```
+  → normalized: "REST conventions endpoints follow"
+  → AND miss → REDUCED_AND("REST conventions endpoints"): match
+  → fts_strategy: REDUCED_AND, dropped: ["follow"]
 
-### Bad queries (even after normalization)
-
-```
 "how are the services monitored in production"
   → normalized: "services monitored production"
-  → MISS: "monitored" ≠ "Monitoring" (no stemming)
-  → Fix: use "Prometheus monitoring" instead
+  → AND miss → REDUCED_AND miss → OR_FALLBACK: 5 hits
+  → ranked by coverage — items with more terms ranked first
+  → fts_strategy: OR_FALLBACK
+```
 
-"how does the notification system work"
-  → normalized: "notification system work"
-  → MISS: "notification" ≠ "notifications" (no stemming)
-  → Fix: use "NotificationServiceImpl" instead
+### Bad queries (even after cascade)
+
+```
+"monitored" vs "Monitoring"
+  → no stemming — neither AND nor cascade helps
+  → Fix: use the exact codebase form
 
 "what database is used for storage in this project"
   → normalized: "database used storage project"
-  → MISS: terms span multiple items (AND logic)
-  → Fix: split into "PostgreSQL database" and "storage partitioned"
+  → cascade finds OR results but precision is low
+  → Fix: use identifiers — "PostgreSQL" or "DataSource"
 ```
 
 Think like a developer using grep, not like a user asking a chatbot.
-eco rewards precision. That's not a flaw — that's power.
+eco rewards precision. The cascade catches the misses — but identifiers still win.
 
 ---
 
@@ -226,6 +265,26 @@ Is the query in natural language (> 5 words)?
   → YES: Stop words are stripped automatically.
          If still 0 results, extract 2-3 identifiers. Then recall.
 ```
+
+---
+
+## Scale-Aware Patterns
+
+eco works on codebases from 10 files to 10,000+ files. Adjust strategy by scale:
+
+**Small stores (<500 items):** Default settings work well. Single inspect +
+recall covers most questions. Budget 800-1200 tokens.
+
+**Medium stores (500-3,000 items):** Scope recall to specific mounts or
+subfolders. Use `memory_inspect` at the directory level before drilling down.
+Budget 1200-1500 tokens.
+
+**Large stores (3,000+ items):** Hierarchical inspect — start at root, drill
+into the dominant subtree. Scope every recall to a mount. Budget 1500+ tokens.
+For files with 50+ chunks, navigate by chunk index rather than reading all chunks.
+
+Mount scoping is the key optimization at scale — it restricts both inspect and
+recall to the relevant portion of the codebase.
 
 ---
 
@@ -256,10 +315,13 @@ One call. ~600 tokens. Replaces 10-15 individual file reads.
 
 **When recall returns insufficient results:**
 
-1. **Narrow the query** — more specific keywords, scope to a subfolder.
+Since v0.11.0, the cascade automatically tries term reduction and OR fallback.
+Check `fts_strategy` in the response to understand what happened:
+
+1. **Check `fts_strategy`** — `OR_FALLBACK` means the system already relaxed the query.
 2. **Try different terms** — use the class/function name, not a description.
-3. **Scope to a mount** — restrict search to the relevant directory.
-4. **Check inflection** — use the exact word form from the codebase.
+3. **Check inflection** — "configuration" not "configured" (no stemming).
+4. **Scope to a mount** — restrict search to the relevant directory.
 5. **Escalate to `memory_loop`** — structured refinement with convergence detection.
 6. **Only then** fall back to native `Read` on the specific file identified.
 

@@ -13,8 +13,11 @@ Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import Literal
+from typing import Callable, List, Literal, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ── Stop words ──────────────────────────────────────────────────────────
 
@@ -200,3 +203,108 @@ def suggest_budget(question_length: int) -> int:
         return 1200
     else:
         return 1500
+
+
+# ── FTS Cascade ────────────────────────────────────────────────────────
+
+# Import type here to avoid circular imports at module level
+_SearchStrategy = Literal["AND", "REDUCED_AND", "OR_FALLBACK"]
+
+
+def _drop_order(terms: List[str]) -> List[int]:
+    """Return indices of terms sorted by drop priority (shortest first).
+
+    Tie-break: later position in the original query is dropped first.
+    This is a heuristic, not a guarantee — length does not equal
+    discriminative power, but it is O(1) and adequate after stop-word
+    removal.
+
+    Returns:
+        List of indices into ``terms``, ordered from first-to-drop to
+        last-to-drop.
+    """
+    indexed = list(enumerate(terms))
+    # Sort by (length ASC, position DESC) — shortest first, later first on tie
+    indexed.sort(key=lambda x: (len(x[1]), -x[0]))
+    return [i for i, _ in indexed]
+
+
+def cascade_query(
+    terms: List[str],
+    search_and_fn: Callable[[List[str]], list],
+    search_or_fn: Callable[[List[str]], list],
+    min_results: int = 1,
+) -> Tuple[list, _SearchStrategy, List[str], List[str]]:
+    """Execute FTS query with deterministic fallback cascade.
+
+    Cascade order:
+      1. AND(all terms)
+      2. AND(N-1 terms), dropping shortest term first
+      3. ... repeat until AND(1 term)
+      4. OR(all terms) — last resort
+
+    Each transition is logged. The cascade is deterministic and auditable.
+
+    Args:
+        terms: Normalized query terms (non-empty).
+        search_and_fn: Callable that takes terms list, returns results (AND mode).
+        search_or_fn: Callable that takes terms list, returns results (OR mode).
+        min_results: Minimum result count to accept (default 1).
+
+    Returns:
+        (results, strategy, effective_terms, dropped_terms)
+    """
+    if not terms:
+        return [], "AND", [], []
+
+    # --- Step 1: AND(all terms) ---
+    results = search_and_fn(terms)
+    if len(results) >= min_results:
+        logger.debug(
+            '[search] AND(%s) → %d hits',
+            " ".join(f'"{t}"' for t in terms), len(results),
+        )
+        return results, "AND", list(terms), []
+
+    logger.debug(
+        '[search] AND(%s) → 0 hits',
+        " ".join(f'"{t}"' for t in terms),
+    )
+
+    # --- Step 2: REDUCED_AND (drop terms one at a time) ---
+    if len(terms) > 1:
+        drop_indices = _drop_order(terms)
+        dropped_so_far: List[str] = []
+
+        for drop_idx in drop_indices:
+            remaining = [t for i, t in enumerate(terms) if i != drop_idx
+                         and i not in {drop_indices[j] for j in range(drop_indices.index(drop_idx))}]
+            # Build the reduced term list by excluding all previously dropped + current
+            dropped_so_far.append(terms[drop_idx])
+            remaining = [t for t in terms if t not in dropped_so_far]
+
+            if not remaining:
+                break
+
+            results = search_and_fn(remaining)
+            if len(results) >= min_results:
+                logger.debug(
+                    '[search] REDUCED_AND(%s) → %d hits [dropped: %s]',
+                    " ".join(f'"{t}"' for t in remaining),
+                    len(results),
+                    ", ".join(f'"{t}"' for t in dropped_so_far),
+                )
+                return results, "REDUCED_AND", remaining, dropped_so_far
+
+            logger.debug(
+                '[search] REDUCED_AND(%s) → 0 hits',
+                " ".join(f'"{t}"' for t in remaining),
+            )
+
+    # --- Step 3: OR(all terms) — last resort ---
+    results = search_or_fn(terms)
+    logger.debug(
+        '[search] OR_FALLBACK(%s) → %d hits [coverage-ranked]',
+        " OR ".join(f'"{t}"' for t in terms), len(results),
+    )
+    return results, "OR_FALLBACK", list(terms), []

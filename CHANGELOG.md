@@ -4,6 +4,55 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] — 2026-02-22
+
+### Behavioral change
+
+`search_fulltext()` now uses a deterministic cascade strategy
+(AND → REDUCED_AND → OR_FALLBACK) instead of strict AND. Queries that
+previously returned 0 results may now return results with reduced precision.
+The `fts_strategy` field in MCP responses and `store._last_search_meta`
+indicate which strategy was used. This is an intentional semantic shift
+from strict AND to cascade-with-transparency.
+
+### Added
+
+- **FTS cascade** (`memctl/query.py`): `cascade_query()` implements deterministic
+  fallback — AND(all terms) → REDUCED_AND(N-1) → ... → AND(1) → OR(all).
+  Term-drop heuristic: shortest first. Logged at every transition.
+- **Token-coverage ranking** (`memctl/store.py`): `_rank_by_coverage()` ranks OR
+  results by number of query terms matched. Stable sort preserves FTS5 BM25 order
+  for equal coverage.
+- **Search metadata** (`memctl/types.py`): `SearchStrategy` type alias and `SearchMeta`
+  dataclass. Strategy, original/effective/dropped terms, candidate count.
+- **MCP strategy reporting**: `memory_recall` and `memory_search` return `fts_strategy`,
+  `fts_original_terms`, `fts_effective_terms`, `fts_dropped_terms` in responses.
+- **Injection block hint** (`memctl/mcp/formatting.py`): strategy hint line in injection
+  blocks when cascade used non-AND strategy.
+- **ECO.md v2**: FTS Cascade Behavior section, Stemming Limitations section,
+  Scale-Aware Patterns section. Updated recovery sequence and escalation ladder
+  to reflect cascade. Universal doctrine — no profile split.
+
+### Benchmark (enterprise Java codebases)
+
+Validated on two enterprise Java codebases (3,419 items / 451 MB and 1,283 items / 13 MB):
+
+| Metric | Large v0.10 | Large v0.11 | Medium v0.10 | Medium v0.11 |
+|--------|------------|------------|-------------|-------------|
+| Identifiers | 100% | 100% | 100%* | 100%* |
+| Multi-term | 40% | **100%** | 0% | **60%** |
+| NL queries | 0% | **100%** | 0% | **90%** |
+
+No regression on single-term queries. No latency regression (all ops <1.3s).
+
+### Tests
+
+- `tests/test_fts_cascade.py` — 40 tests (C1-C40): AND baseline, REDUCED_AND,
+  OR_FALLBACK, strategy metadata, edge cases, LIKE fallback, integration, logging,
+  backward compatibility.
+- `tests/test_token_ranking.py` — 20 tests (R1-R20): coverage ranking, edge cases,
+  case insensitivity, integration, stability properties.
+
 ## [0.10.0] — 2026-02-21
 
 ### Added
