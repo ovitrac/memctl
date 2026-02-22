@@ -808,6 +808,22 @@ class MemoryStore:
                     dropped_terms=dropped,
                     total_candidates=len(results),
                 )
+
+                # Morphological miss hint (v0.12.1):
+                # When the cascade fell through to a weak strategy on a
+                # non-Porter tokenizer with multi-term queries, suggest
+                # reindexing with stemming.
+                if (
+                    strategy in ("OR_FALLBACK", "PREFIX_AND", "LIKE")
+                    and len(terms) > 1
+                    and not self._is_porter_tokenizer()
+                ):
+                    self._last_search_meta.morphological_hint = (
+                        "Some query terms may not match due to inflection "
+                        "(e.g. 'monitored' vs 'monitoring'). "
+                        "Consider: memctl reindex --tokenizer en"
+                    )
+
                 return results
 
             except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:

@@ -474,6 +474,11 @@ def cmd_search(args: argparse.Namespace) -> None:
                 print(f"    tags: {', '.join(it.tags)}")
             print()
 
+    # Morphological miss hint (stderr — advisory only)
+    meta = store._last_search_meta
+    if meta and meta.morphological_hint:
+        _info(f"Hint: {meta.morphological_hint}")
+
     store.close()
 
 

@@ -4,6 +4,21 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.1] — 2026-02-22
+
+### Added
+
+- **Morphological miss hint**: when the FTS cascade falls to a weak strategy
+  (OR_FALLBACK, PREFIX_AND, or LIKE) on a non-Porter tokenizer with multi-term
+  queries, `SearchMeta.morphological_hint` suggests `memctl reindex --tokenizer en`.
+  Surfaced in MCP responses (`memory_recall`, `memory_search`) and CLI (`memctl search`,
+  stderr). Advisory only — no behavioral change.
+
+### Tests
+
+- 7 new tests (PX16-PX22): morphological hint conditions, Porter suppression,
+  serialization. Total: 966 passed, 6 skipped.
+
 ## [0.12.0] — 2026-02-22
 
 ### Added

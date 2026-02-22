@@ -185,3 +185,60 @@ class TestStrategyMetadata:
         prefix_store.search_fulltext("monitor notif")
         meta = prefix_store._last_search_meta
         assert meta.dropped_terms == []
+
+
+# ---------------------------------------------------------------------------
+# PX16-PX22: Morphological miss hint
+# ---------------------------------------------------------------------------
+
+class TestMorphologicalHint:
+    def test_px16_no_hint_on_reduced_and(self, prefix_store):
+        """REDUCED_AND does not trigger hint — it found results, not a morph miss."""
+        # "middleware" matches item_3, "batches" dropped → REDUCED_AND
+        prefix_store.search_fulltext("middleware batches")
+        meta = prefix_store._last_search_meta
+        assert meta.strategy == "REDUCED_AND"
+        assert meta.morphological_hint is None
+
+    def test_px17_hint_on_prefix_and(self, prefix_store):
+        """Hint fires when PREFIX_AND is the winning strategy."""
+        prefix_store.search_fulltext("monitor notif")
+        meta = prefix_store._last_search_meta
+        assert meta.strategy == "PREFIX_AND"
+        assert meta.morphological_hint is not None
+        assert "memctl reindex --tokenizer en" in meta.morphological_hint
+
+    def test_px18_no_hint_on_exact_and(self, prefix_store):
+        """No hint when AND matches cleanly."""
+        prefix_store.search_fulltext("monitoring system")
+        meta = prefix_store._last_search_meta
+        assert meta.strategy == "AND"
+        assert meta.morphological_hint is None
+
+    def test_px19_no_hint_with_porter(self, porter_store):
+        """No hint when Porter stemming is active."""
+        porter_store.search_fulltext("monitored notifications")
+        meta = porter_store._last_search_meta
+        # Porter handles inflection — no hint regardless of strategy
+        assert meta.morphological_hint is None
+
+    def test_px20_no_hint_single_term(self, prefix_store):
+        """No hint for single-term queries (not a morphological issue)."""
+        prefix_store.search_fulltext("xyznonexistent")
+        meta = prefix_store._last_search_meta
+        assert meta.morphological_hint is None
+
+    def test_px21_hint_in_to_dict(self, prefix_store):
+        """morphological_hint serializes correctly in to_dict()."""
+        prefix_store.search_fulltext("monitor notif")
+        meta = prefix_store._last_search_meta
+        d = meta.to_dict()
+        assert "morphological_hint" in d
+        assert d["morphological_hint"] is not None
+
+    def test_px22_no_hint_in_to_dict_when_none(self, prefix_store):
+        """morphological_hint is None in to_dict() for clean AND."""
+        prefix_store.search_fulltext("monitoring system")
+        meta = prefix_store._last_search_meta
+        d = meta.to_dict()
+        assert d["morphological_hint"] is None

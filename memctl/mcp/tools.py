@@ -207,6 +207,10 @@ def register_memory_tools(
                     "3. Use 'memory_inspect' to see the folder structure first"
                 )
 
+            # Morphological miss hint (v0.12.1)
+            if meta and meta.morphological_hint and "hint" not in result:
+                result["hint"] = meta.morphological_hint
+
             return result
 
         except RateLimitExceeded as e:
@@ -330,6 +334,10 @@ def register_memory_tools(
                     "2. Remove articles and prepositions\n"
                     "3. Use 'memory_inspect' to see the folder structure first"
                 )
+
+            # Morphological miss hint (v0.12.1)
+            if meta and meta.morphological_hint and "hint" not in search_result:
+                search_result["hint"] = meta.morphological_hint
 
             return search_result
 

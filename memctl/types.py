@@ -343,6 +343,7 @@ class SearchMeta:
     effective_terms: List[str] = field(default_factory=list)
     dropped_terms: List[str] = field(default_factory=list)
     total_candidates: int = 0
+    morphological_hint: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dict for MCP responses and audit."""
