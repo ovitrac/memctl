@@ -1279,17 +1279,19 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     server_args = mcp_parser().parse_args(server_argv)
 
+    # --check mode: validate configuration without opening the database.
+    # The DB is created on first actual use, not at install time.
+    if getattr(args, "check", False):
+        from memctl import __version__
+        db_path = server_args.db
+        print(f"memctl MCP server OK (v{__version__}, db={db_path})")
+        return
+
     try:
         mcp, _ = create_server(server_args)
     except ImportError:
         _warn("MCP dependencies not installed. Run: pip install memctl[mcp]")
         sys.exit(1)
-
-    # --check mode: verify server, print status, exit
-    if getattr(args, "check", False):
-        from memctl import __version__
-        print(f"memctl MCP server OK (v{__version__}, db={server_args.db})")
-        return
 
     _info(f"memctl MCP server (db={server_args.db})")
     _info("Press Ctrl+C to stop.")

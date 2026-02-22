@@ -326,6 +326,9 @@ class MemoryStore:
         self._fts5_available: bool = False
         self._fts_tokenizer = fts_tokenizer or "unicode61 remove_diacritics 2"
         self._last_search_meta: Optional[SearchMeta] = None
+        # Auto-create parent directory for disk-backed databases.
+        if db_path != ":memory:":
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(
             db_path, check_same_thread=False,
             detect_types=sqlite3.PARSE_DECLTYPES,

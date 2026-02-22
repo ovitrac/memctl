@@ -11,7 +11,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.13.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Version](https://img.shields.io/badge/version-0.13.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
 [![Tests](https://img.shields.io/badge/tests-994%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-16%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)

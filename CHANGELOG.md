@@ -4,6 +4,18 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.1] — 2026-02-22
+
+### Fixed
+- **Bootstrap DB creation**: `MemoryStore` auto-creates parent directories
+  when opening a disk-backed database. `memctl sync --db .memory/memory.db .`
+  now works without prior `mkdir -p .memory` or `memctl init`.
+- **`/scan` CLI fallback**: template includes correct CLI syntax (positional
+  `path`, not `--path` flag) and explicit MCP-first / CLI-fallback guidance.
+- **`serve --check` install-time safety**: `--check` now validates configuration
+  (imports, db path, version) without opening the database. Previously failed
+  at install time when `.memory/memory.db` did not yet exist.
+
 ## [0.13.0] — 2026-02-22
 
 ### Added

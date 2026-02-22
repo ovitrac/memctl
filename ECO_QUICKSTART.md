@@ -1,6 +1,6 @@
 # eco Mode Quickstart — Claude Code Edition
 
-**Version**: 0.13.0 | **Time to first eco session: ~5 minutes**
+**Version**: 0.13.1 | **Time to first eco session: ~5 minutes**
 
 eco mode replaces Claude's sequential file browsing with deterministic structural
 retrieval and persistent cross-file reasoning. Same questions, better answers, fewer
@@ -546,4 +546,4 @@ SQLite with FTS5 is very space-efficient.
 
 ---
 
-*memctl v0.13.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.13.1 — Olivier Vitrac, Adservio Innovation Lab*
