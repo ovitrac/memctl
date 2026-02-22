@@ -31,10 +31,10 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-readonly SCRIPT_DIR REPO_ROOT
+readonly SCRIPT_DIR
 
-readonly ECO_TEMPLATES="${REPO_ROOT}/extras/eco"
+# Templates live alongside scripts in the package (memctl/templates/eco/)
+readonly ECO_TEMPLATES="${SCRIPT_DIR}/../templates/eco"
 readonly DEFAULT_DB_ROOT=".memory"
 
 # Target paths (project-local)

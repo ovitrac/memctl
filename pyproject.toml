@@ -56,6 +56,9 @@ include = ["memctl*"]
 [tool.setuptools.package-data]
 memctl = [
     "scripts/*.sh",
+    "templates/eco/*.sh",
+    "templates/eco/*.md",
+    "templates/hooks/*.sh",
 ]
 
 [tool.ruff]

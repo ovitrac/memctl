@@ -11,15 +11,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Scripts bundled in PyPI wheel**: `scripts/` moved inside `memctl/scripts/` so that
   `pip install memctl` includes installer/uninstaller shell scripts. Previously, scripts
   were only available from a git clone.
-- **`REPO_ROOT` path in scripts**: adjusted from `SCRIPT_DIR/..` to `SCRIPT_DIR/../..`
-  to account for the new directory depth.
+- **Templates bundled in PyPI wheel**: `extras/eco/` and `extras/claude-code/hooks/`
+  templates copied into `memctl/templates/` so install scripts work after `pip install`.
+  Scripts now resolve templates from `SCRIPT_DIR/../templates/` instead of `REPO_ROOT/extras/`.
 
 ### Added
 
 - **`memctl scripts-path` command**: prints the path to bundled installer scripts,
   enabling `bash "$(memctl scripts-path)/install_eco.sh"` after a PyPI install.
-- **`[tool.setuptools.package-data]`** in `pyproject.toml`: ensures `*.sh` files are
-  included in the wheel.
+- **`memctl/templates/`**: bundled eco templates (`eco-hint.sh`, `ECO.md`, `eco.md`)
+  and hook templates (`memctl_safety_guard.sh`, `memctl_audit_logger.sh`).
+- **`[tool.setuptools.package-data]`** in `pyproject.toml`: ensures `*.sh` and `*.md`
+  template files are included in the wheel.
 
 ## [0.12.1] — 2026-02-22
 

@@ -16,8 +16,7 @@ readonly SETTINGS_FILE="${HOME}/.claude/settings.json"
 
 # Resolve hook paths relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-readonly HOOKS_DIR="${REPO_ROOT}/extras/claude-code/hooks"
+readonly HOOKS_DIR="${SCRIPT_DIR}/../templates/hooks"
 
 # Colors (TTY-aware)
 if [[ -t 1 ]]; then
