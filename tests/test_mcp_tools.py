@@ -70,8 +70,8 @@ def call(env, tool_name, **kwargs):
 
 
 class TestToolCount:
-    def test_14_tools_registered(self, mcp_env):
-        assert len(mcp_env["mcp"].tools) == 14
+    def test_15_tools_registered(self, mcp_env):
+        assert len(mcp_env["mcp"].tools) == 15
 
     def test_all_tool_names(self, mcp_env):
         expected = {
@@ -79,6 +79,7 @@ class TestToolCount:
             "memory_read", "memory_stats", "memory_consolidate",
             "memory_mount", "memory_sync", "memory_inspect",
             "memory_ask", "memory_export", "memory_import", "memory_loop",
+            "memory_reindex",
         }
         assert set(mcp_env["mcp"].tools.keys()) == expected
 

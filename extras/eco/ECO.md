@@ -193,6 +193,19 @@ Porter stemming. This means inflected forms do not match:
 - "monitor" not "monitored"
 - `NotificationServiceImpl` not "notification system"
 
+### Stemming control (v0.12.0)
+
+If inflection misses are frequent, switch to the Porter stemmer:
+
+    memctl reindex --tokenizer en
+
+This enables: "configured" ↔ "configuration", "monitored" ↔ "monitoring".
+Porter is English-only. The default (`fr`) is accent-safe without stemming.
+
+After reindex, prefix expansion is automatically disabled (Porter handles it).
+
+Use `memctl reindex --dry-run` to preview changes before applying.
+
 ### Good queries
 
 **Identifiers (always best):**

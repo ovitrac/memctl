@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.11.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-919%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-14%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.12.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-959%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-15%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -710,6 +710,7 @@ memctl serve --db memory.db --no-rate-limit
 | `memory_export` | JSONL export with filters | v0.7 |
 | `memory_import` | JSONL import with policy enforcement | v0.7 |
 | `memory_loop` | Bounded recall-answer loop | v0.7 |
+| `memory_reindex` | Rebuild FTS5 index (tokenizer change) | v0.12 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
@@ -755,10 +756,14 @@ eco mode is advisory for retrieval, not restrictive for editing.
 question words) are stripped automatically before FTS search. Code identifiers
 (CamelCase, snake_case, UPPER_CASE) are always preserved.
 
-**FTS cascade (v0.11):** When a multi-term query returns 0 results, the system
-automatically cascades: AND(all) → REDUCED_AND(N-1) → ... → OR(all). Each step is
-logged and the strategy (`fts_strategy`) is reported in MCP responses. Benchmark on
-enterprise Java codebases: multi-term hit rate 40%→100%, NL hit rate 0%→95%.
+**FTS cascade (v0.11+):** When a multi-term query returns 0 results, the system
+automatically cascades: AND → REDUCED_AND → PREFIX_AND → OR_FALLBACK. Prefix
+expansion (v0.12) uses `"term"*` for terms ≥5 chars, skipped with Porter stemming.
+Each step is logged and the strategy (`fts_strategy`) is reported in MCP responses.
+
+**Stemming (v0.12):** `memctl reindex --tokenizer en` enables Porter stemming for
+English codebases. The `reindex` command logs metadata to `schema_meta` and emits
+audit events. Use `memctl stats` to check tokenizer and mismatch status.
 
 **Pilot guidance:** See [`extras/eco/PILOT.md`](extras/eco/PILOT.md) for a generic
 framework to evaluate eco mode with a development team (20-30 developers, 2-4 weeks,

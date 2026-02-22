@@ -1,6 +1,6 @@
 # eco Mode Quickstart — Claude Code Edition
 
-**Version**: 0.11.0 | **Time to first eco session: ~5 minutes**
+**Version**: 0.12.0 | **Time to first eco session: ~5 minutes**
 
 eco mode replaces Claude's sequential file browsing with deterministic structural
 retrieval and persistent cross-file reasoning. Same questions, better answers, fewer
@@ -236,7 +236,7 @@ Redis caching                → finds caching strategy
 ```
 
 **Natural language (since v0.10.0+):** Stop words are stripped automatically.
-Since v0.11.0, a cascade (AND → REDUCED_AND → OR) auto-recovers when strict AND fails.
+A cascade (AND → REDUCED_AND → PREFIX_AND → OR_FALLBACK) auto-recovers when strict AND fails. For stemming: `memctl reindex --tokenizer en`.
 
 ```
 "what is the incident escalation workflow"
@@ -540,4 +540,4 @@ SQLite with FTS5 is very space-efficient.
 
 ---
 
-*memctl v0.11.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.12.0 — Olivier Vitrac, Adservio Innovation Lab*

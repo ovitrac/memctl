@@ -62,7 +62,7 @@ class TestToolClassification:
     def test_write_tools_membership(self):
         expected = {
             "memory_write", "memory_propose", "memory_import",
-            "memory_consolidate", "memory_sync",
+            "memory_consolidate", "memory_sync", "memory_reindex",
         }
         assert WRITE_TOOLS == expected
 

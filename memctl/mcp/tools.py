@@ -1,5 +1,5 @@
 """
-memctl MCP Tools — 14 memory tools for MCP integration.
+memctl MCP Tools — 15 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
 Each tool follows the locked middleware order:
@@ -19,6 +19,7 @@ Tool hierarchy:
     FOLDER:     memory_mount, memory_sync, memory_inspect, memory_ask
     DATA:       memory_export, memory_import
     LOOP:       memory_loop
+    ADMIN:      memory_reindex
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
@@ -59,7 +60,7 @@ def register_memory_tools(
     audit=None,
 ) -> None:
     """
-    Register all 14 memory MCP tools on a FastMCP server instance.
+    Register all 15 memory MCP tools on a FastMCP server instance.
 
     Args:
         mcp: FastMCP server instance.
@@ -1316,8 +1317,100 @@ def register_memory_tools(
             audit.log("memory_loop", rid, session_id, _audit_db,
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
+    # =====================================================================
+    # ADMIN: reindex  (v0.12)
+    # =====================================================================
+
+    @mcp.tool()
+    def memory_reindex(
+        tokenizer: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """Rebuild the FTS5 index, optionally with a new tokenizer.
+
+        Use this to switch between tokenizer presets (fr/en/raw) or rebuild
+        a stale index after bulk imports.
+
+        Args:
+            tokenizer: Tokenizer preset (fr/en/raw) or full string. None = rebuild in place.
+            dry_run: If true, report what would change without executing.
+
+        Returns:
+            previous_tokenizer, new_tokenizer, items_indexed, duration_seconds.
+        """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        try:
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
+
+            from memctl.store import FTS_TOKENIZER_PRESETS
+
+            old_tokenizer = store._fts_tokenizer
+            new_tokenizer = (
+                FTS_TOKENIZER_PRESETS.get(tokenizer, tokenizer)
+                if tokenizer else old_tokenizer
+            )
+            changing = old_tokenizer != new_tokenizer
+
+            if dry_run:
+                stats = store.stats()
+                detail = {"dry_run": True, "tokenizer_change": changing}
+                return {
+                    "status": "dry_run",
+                    "current_tokenizer": old_tokenizer,
+                    "new_tokenizer": new_tokenizer,
+                    "tokenizer_change": changing,
+                    "items_to_reindex": stats["total_items"],
+                }
+
+            count = store.rebuild_fts(
+                tokenizer=new_tokenizer if changing else None,
+            )
+            dt = time.monotonic() - t0
+
+            if count < 0:
+                outcome = "error"
+                return {"status": "error", "message": "FTS5 not available"}
+
+            # Log reindex event for auditability
+            store._log_event("reindex", None, {
+                "previous_tokenizer": old_tokenizer,
+                "new_tokenizer": new_tokenizer,
+                "tokenizer_changed": changing,
+                "items_indexed": count,
+                "duration_seconds": round(dt, 2),
+            }, "")
+            store._conn.commit()
+
+            detail = {
+                "tokenizer_changed": changing,
+                "items_indexed": count,
+            }
+            return {
+                "status": "ok",
+                "previous_tokenizer": old_tokenizer,
+                "new_tokenizer": new_tokenizer,
+                "tokenizer_changed": changing,
+                "items_indexed": count,
+                "duration_seconds": round(dt, 2),
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Reindex failed: {e}"}
+        finally:
+            audit.log("memory_reindex", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
+
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 14 memory MCP tools (with L0/L1 middleware)")
+    logger.info("Registered 15 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------

@@ -1,6 +1,6 @@
 # memctl Quickstart
 
-**Version**: 0.11.0 | **Time to first recall: ~3 minutes**
+**Version**: 0.12.0 | **Time to first recall: ~3 minutes**
 
 memctl gives LLMs persistent, structured, policy-governed memory backed by a single SQLite file. Ingest files, recall with FTS5, pipe into any LLM. Zero dependencies beyond Python's stdlib.
 
@@ -390,7 +390,7 @@ Every write path passes through the policy engine. 35 detection patterns check f
 
 ### What is FTS5 AND logic?
 
-SQLite FTS5 matches items where **all** query terms appear in a single item. Since v0.11.0, a deterministic cascade (AND → REDUCED_AND → OR) automatically recovers when strict AND returns 0 results. Stop words are stripped automatically (v0.10.0+). Short, precise queries (2-3 identifiers) still give the best precision.
+SQLite FTS5 matches items where **all** query terms appear in a single item. A deterministic cascade (AND → REDUCED_AND → PREFIX_AND → OR_FALLBACK) automatically recovers when strict AND returns 0 results. Prefix expansion (v0.12) handles partial morphological matches. For full stemming: `memctl reindex --tokenizer en`. Short, precise queries (2-3 identifiers) still give the best precision.
 
 ### How big can the database get?
 
@@ -435,4 +435,4 @@ No. memctl is a Unix CLI tool and MCP server. For visual exploration, use `memct
 
 ---
 
-*memctl v0.11.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.12.0 — Olivier Vitrac, Adservio Innovation Lab*

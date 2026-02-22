@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Literal, Optional
 # ---------------------------------------------------------------------------
 
 MemoryTier = Literal["stm", "mtm", "ltm"]
-SearchStrategy = Literal["AND", "REDUCED_AND", "OR_FALLBACK", "LIKE"]
+SearchStrategy = Literal["AND", "REDUCED_AND", "PREFIX_AND", "OR_FALLBACK", "LIKE"]
 MemoryType = Literal[
     "fact", "decision", "definition", "constraint",
     "pattern", "todo", "pointer", "note",

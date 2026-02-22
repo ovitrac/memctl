@@ -397,11 +397,30 @@ class MemoryStore:
         fall back to the LIKE-based implementation.
         """
         try:
+            # Check if FTS table already exists (before CREATE IF NOT EXISTS)
+            fts_existed = self._conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='memory_items_fts'"
+            ).fetchone() is not None
             # Check for existing FTS table with different tokenizer
             self._check_fts_tokenizer_mismatch()
             self._conn.executescript(_fts5_schema_sql(self._fts_tokenizer))
             self._conn.commit()
             self._fts5_available = True
+            # Persist tokenizer metadata only on fresh creation — not when
+            # the table pre-existed (which would overwrite correct metadata
+            # if the store is opened with a different tokenizer preset).
+            if not fts_existed:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO schema_meta (key, value) "
+                    "VALUES ('fts_tokenizer', ?)",
+                    (self._fts_tokenizer,),
+                )
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO schema_meta (key, value) "
+                    "VALUES ('fts_indexed_at', datetime('now'))",
+                )
+                self._conn.commit()
             logger.debug(
                 f"FTS5 virtual table initialized (tokenizer={self._fts_tokenizer})"
             )
@@ -485,12 +504,36 @@ class MemoryStore:
             count = self._conn.execute(
                 "SELECT COUNT(*) as cnt FROM memory_items"
             ).fetchone()["cnt"]
+            # Update tokenizer metadata in schema_meta
+            self._conn.execute(
+                "INSERT OR REPLACE INTO schema_meta (key, value) "
+                "VALUES ('fts_tokenizer', ?)",
+                (self._fts_tokenizer,),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO schema_meta (key, value) "
+                "VALUES ('fts_indexed_at', datetime('now'))",
+            )
+            # Increment reindex counter
+            prev = self._conn.execute(
+                "SELECT value FROM schema_meta WHERE key='fts_reindex_count'"
+            ).fetchone()
+            reindex_count = int(prev[0]) if prev else 0
+            self._conn.execute(
+                "INSERT OR REPLACE INTO schema_meta (key, value) "
+                "VALUES ('fts_reindex_count', ?)",
+                (str(reindex_count + 1),),
+            )
             self._conn.commit()
             logger.info(
                 f"FTS5 index rebuilt: {count} items indexed "
                 f"(tokenizer={self._fts_tokenizer})"
             )
             return count
+
+    def _is_porter_tokenizer(self) -> bool:
+        """Return True if the current tokenizer includes Porter stemming."""
+        return "porter" in self._fts_tokenizer.lower()
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
@@ -737,6 +780,21 @@ class MemoryStore:
                     terms, and_fn, or_fn,
                 )
 
+                # PREFIX_AND: try prefix expansion before accepting OR results
+                # Skipped when Porter stemming is active (redundant).
+                if strategy == "OR_FALLBACK" and not self._is_porter_tokenizer():
+                    prefix_results = self._search_fts5_prefix_and(terms, **fts_kw)
+                    if prefix_results:
+                        results = prefix_results
+                        strategy = "PREFIX_AND"
+                        effective = list(terms)
+                        dropped = []
+                        logger.debug(
+                            '[search] PREFIX_AND(%s) → %d hits',
+                            " ".join(f'"{t}"*' if len(t) >= self._PREFIX_MIN_LEN else f'"{t}"' for t in terms),
+                            len(results),
+                        )
+
                 # OR results need coverage ranking
                 if strategy == "OR_FALLBACK" and results:
                     results = _rank_by_coverage(results, terms)
@@ -800,6 +858,33 @@ class MemoryStore:
         """FTS5 OR search — any term matches. Results need coverage ranking."""
         escaped = ['"' + t.replace('"', '""') + '"' for t in terms]
         fts_query = " OR ".join(escaped)
+        return self._search_fts5_raw(
+            fts_query, tier=tier, type_filter=type_filter,
+            scope=scope, corpus_id=corpus_id,
+            exclude_archived=exclude_archived, limit=limit,
+        )
+
+    _PREFIX_MIN_LEN = 5  # Minimum term length for prefix expansion
+
+    def _search_fts5_prefix_and(
+        self,
+        terms: List[str],
+        tier: Optional[str] = None,
+        type_filter: Optional[str] = None,
+        scope: Optional[str] = None,
+        corpus_id: Optional[str] = None,
+        exclude_archived: bool = True,
+        limit: int = 100,
+    ) -> List[MemoryItem]:
+        """FTS5 AND search with prefix expansion on eligible terms (≥5 chars)."""
+        escaped = []
+        for t in terms:
+            safe = t.replace('"', '""')
+            if len(t) >= self._PREFIX_MIN_LEN:
+                escaped.append('"' + safe + '"*')
+            else:
+                escaped.append('"' + safe + '"')
+        fts_query = " AND ".join(escaped)
         return self._search_fts5_raw(
             fts_query, tier=tier, type_filter=type_filter,
             scope=scope, corpus_id=corpus_id,
@@ -1129,6 +1214,20 @@ class MemoryStore:
             embeddings_count = self._conn.execute(
                 "SELECT COUNT(*) as cnt FROM memory_embeddings"
             ).fetchone()["cnt"]
+            # Read tokenizer metadata from schema_meta
+            meta_tok = self._conn.execute(
+                "SELECT value FROM schema_meta WHERE key='fts_tokenizer'"
+            ).fetchone()
+            meta_indexed = self._conn.execute(
+                "SELECT value FROM schema_meta WHERE key='fts_indexed_at'"
+            ).fetchone()
+            meta_reindex = self._conn.execute(
+                "SELECT value FROM schema_meta WHERE key='fts_reindex_count'"
+            ).fetchone()
+            stored_tok = meta_tok[0] if meta_tok else None
+            mismatch = (
+                stored_tok is not None and stored_tok != self._fts_tokenizer
+            ) if self._fts5_available else False
             return {
                 "total_items": total,
                 "by_tier": by_tier,
@@ -1137,6 +1236,10 @@ class MemoryStore:
                 "embeddings_count": embeddings_count,
                 "fts5_available": self._fts5_available,
                 "fts_tokenizer": self._fts_tokenizer if self._fts5_available else None,
+                "fts_tokenizer_stored": stored_tok,
+                "fts_indexed_at": meta_indexed[0] if meta_indexed else None,
+                "fts_reindex_count": int(meta_reindex[0]) if meta_reindex else 0,
+                "fts_tokenizer_mismatch": mismatch,
             }
 
     # -- Export/Import -----------------------------------------------------

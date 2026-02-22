@@ -4,6 +4,40 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0] — 2026-02-22
+
+### Added
+
+- **`memctl reindex` command**: rebuild FTS5 index with optional tokenizer change.
+  Logged, auditable, with `--dry-run` and `--json` support. Every reindex emits
+  a `memory_event` with tokenizer, item count, and duration.
+- **Tokenizer metadata**: `schema_meta` records `fts_tokenizer`, `fts_indexed_at`,
+  `fts_reindex_count`. Visible in `memctl stats` and `memory_stats` MCP tool.
+  Mismatch detection warns when stored tokenizer differs from configured.
+- **Prefix expansion**: `PREFIX_AND` cascade step — `"monitor"*` matches
+  `monitoring`, `monitored`. Only for terms ≥5 chars. Skipped when Porter
+  stemming is active (redundant). Position: after REDUCED_AND, before OR_FALLBACK.
+- **`memory_reindex` MCP tool** (tool #15): rebuild FTS5 index via MCP, with
+  `dry_run` support. Classified as WRITE_TOOL (rate-limited).
+- **`_is_porter_tokenizer()` helper**: detects Porter stemming in active tokenizer.
+
+### Changed
+
+- `rebuild_fts()` now updates `schema_meta` with tokenizer, indexed_at, and
+  increments `fts_reindex_count`.
+- `stats()` reports `fts_tokenizer_stored`, `fts_indexed_at`, `fts_reindex_count`,
+  and `fts_tokenizer_mismatch` fields.
+- Cascade order: AND → REDUCED_AND → PREFIX_AND → OR_FALLBACK → LIKE.
+- MCP tool count: 14 → 15.
+
+### Tests
+
+- `tests/test_reindex.py` — 25 tests (X1-X25): rebuild, tokenizer change, mismatch,
+  metadata persistence, dry run, edge cases, event logging.
+- `tests/test_prefix_search.py` — 15 tests (PX1-PX15): basic prefix, min-length guard,
+  Porter skip, cascade integration, strategy metadata.
+- **Total: 959 passed, 6 skipped.**
+
 ## [0.11.0] — 2026-02-22
 
 ### Behavioral change

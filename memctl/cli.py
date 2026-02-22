@@ -17,6 +17,7 @@ Commands:
     memctl chat   --llm CMD [--session]      — interactive memory-backed chat
     memctl export [--tier T] [--type T]      — JSONL export → stdout
     memctl import [FILE] [--preserve-ids]    — JSONL import from file or stdin
+    memctl reindex [--tokenizer PRESET]      — rebuild FTS5 index
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -539,6 +540,12 @@ def cmd_stats(args: argparse.Namespace) -> None:
         print(f"  FTS5:     {'available' if stats['fts5_available'] else 'unavailable'}")
         if stats.get("fts_tokenizer"):
             print(f"  Tokenizer: {stats['fts_tokenizer']}")
+        if stats.get("fts_tokenizer_mismatch"):
+            print(f"  Stored tokenizer: {stats['fts_tokenizer_stored']}  (mismatch — run: memctl reindex)")
+        if stats.get("fts_indexed_at"):
+            print(f"  Indexed at: {stats['fts_indexed_at']}")
+        if stats.get("fts_reindex_count", 0) > 0:
+            print(f"  Reindex count: {stats['fts_reindex_count']}")
         print(f"  By tier:")
         for tier, count in sorted(stats.get("by_tier", {}).items()):
             print(f"    {tier.upper():4s}: {count}")
@@ -1098,6 +1105,90 @@ def cmd_import(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: reindex  (rebuild FTS5 index)
+# ===========================================================================
+
+
+def cmd_reindex(args: argparse.Namespace) -> None:
+    """Rebuild the FTS5 index, optionally with a new tokenizer."""
+    import time
+
+    db_path = _resolve_db(args)
+    store = _open_store(db_path)
+
+    old_tokenizer = store._fts_tokenizer
+    new_tokenizer = (
+        _resolve_fts(args.tokenizer) if getattr(args, "tokenizer", None)
+        else old_tokenizer
+    )
+    changing = old_tokenizer != new_tokenizer
+    item_count = store.stats()["total_items"]
+
+    # -- Dry run: report plan and exit
+    if getattr(args, "dry_run", False):
+        if getattr(args, "json", False):
+            print(json.dumps({
+                "status": "dry_run",
+                "current_tokenizer": old_tokenizer,
+                "new_tokenizer": new_tokenizer,
+                "tokenizer_change": changing,
+                "items_to_reindex": item_count,
+            }, indent=2, ensure_ascii=False))
+        else:
+            _info(f"Current tokenizer: {old_tokenizer}")
+            _info(f"New tokenizer:     {new_tokenizer}")
+            _info(f"Items to reindex:  {item_count}")
+            if not changing:
+                _info("No tokenizer change — would rebuild in place.")
+            else:
+                _info("Tokenizer change detected — FTS table will be dropped and recreated.")
+        store.close()
+        return
+
+    # -- Execute reindex
+    t0 = time.monotonic()
+    count = store.rebuild_fts(
+        tokenizer=new_tokenizer if changing else None,
+    )
+    dt = time.monotonic() - t0
+
+    if count < 0:
+        _warn("FTS5 not available — cannot reindex.")
+        store.close()
+        sys.exit(1)
+
+    # Log reindex event for auditability
+    store._log_event("reindex", None, {
+        "previous_tokenizer": old_tokenizer,
+        "new_tokenizer": new_tokenizer,
+        "tokenizer_changed": changing,
+        "items_indexed": count,
+        "duration_seconds": round(dt, 2),
+    }, "")
+    store._conn.commit()
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "status": "ok",
+            "previous_tokenizer": old_tokenizer,
+            "new_tokenizer": new_tokenizer,
+            "tokenizer_changed": changing,
+            "items_indexed": count,
+            "duration_seconds": round(dt, 2),
+        }, indent=2, ensure_ascii=False))
+    else:
+        _info(f"Reindexed {count} items in {dt:.1f}s")
+        _info(f"  Previous: {old_tokenizer}")
+        _info(f"  Current:  {new_tokenizer}")
+        if changing:
+            _info("  Tokenizer changed — FTS index rebuilt from scratch.")
+        else:
+            _info("  In-place rebuild (same tokenizer).")
+
+    store.close()
+
+
+# ===========================================================================
 # Command: serve  (start MCP server)
 # ===========================================================================
 
@@ -1528,6 +1619,21 @@ def main() -> None:
         help="Count items without writing",
     )
     p_import.set_defaults(func=cmd_import)
+
+    # -- reindex -----------------------------------------------------------
+    p_reindex = sub.add_parser(
+        "reindex", parents=[_common],
+        help="Rebuild FTS5 index (optionally with new tokenizer)",
+    )
+    p_reindex.add_argument(
+        "--tokenizer", default=None,
+        help="Tokenizer preset (fr/en/raw) or full string (default: current)",
+    )
+    p_reindex.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Show plan without executing",
+    )
+    p_reindex.set_defaults(func=cmd_reindex)
 
     # -- serve -------------------------------------------------------------
     p_serve = sub.add_parser("serve", parents=[_common], help="Start MCP server")

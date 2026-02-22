@@ -25,7 +25,7 @@ from typing import Dict, Set
 # Tool classification (locked — tests enforce these)
 WRITE_TOOLS: Set[str] = {
     "memory_write", "memory_propose", "memory_import",
-    "memory_consolidate", "memory_sync",
+    "memory_consolidate", "memory_sync", "memory_reindex",
 }
 READ_TOOLS: Set[str] = {
     "memory_recall", "memory_search", "memory_read",
