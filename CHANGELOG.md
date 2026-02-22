@@ -4,6 +4,13 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.3] — 2026-02-22
+
+### Fixed
+
+- **v0.12.2 PyPI re-publish**: v0.12.2 was published to PyPI without templates.
+  This release is the corrected version with all bundled files.
+
 ## [0.12.2] — 2026-02-22
 
 ### Fixed
