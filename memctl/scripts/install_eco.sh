@@ -396,6 +396,73 @@ ECOJSON
 fi
 
 # ---------------------------------------------------------------------------
+# Step 5c: Add memctl permissions (auto-approve CLI operations)
+# ---------------------------------------------------------------------------
+
+info "Step 5c/9: Configuring permissions"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+    info "[dry-run] Would add Bash(memctl *) permission to $SETTINGS_FILE"
+else
+    "$PYTHON_CMD" -c "
+import json, os, sys
+
+settings_path = sys.argv[1]
+
+if os.path.exists(settings_path):
+    with open(settings_path, 'r', encoding='utf-8') as f:
+        try:
+            config = json.load(f)
+        except json.JSONDecodeError:
+            config = {}
+else:
+    config = {}
+
+# Ensure permissions.allow structure
+if 'permissions' not in config:
+    config['permissions'] = {}
+if 'allow' not in config['permissions']:
+    config['permissions']['allow'] = []
+
+allow = config['permissions']['allow']
+
+# Glob patterns for eco mode CLI operations
+eco_patterns = [
+    'Bash(memctl *)',
+    'Bash(test -f */.claude/eco/.disabled*)',
+    'Bash(rm -f */.claude/eco/.disabled)',
+    'Bash(touch */.claude/eco/.disabled)',
+]
+
+added = 0
+for pattern in eco_patterns:
+    if pattern not in allow:
+        allow.append(pattern)
+        added += 1
+
+# Remove exact-match memctl entries superseded by the glob
+before = len(allow)
+allow[:] = [e for e in allow
+            if not (e.startswith('Bash(memctl ') and e != 'Bash(memctl *)')]
+removed = before - len(allow)
+
+config['permissions']['allow'] = allow
+
+with open(settings_path, 'w', encoding='utf-8') as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+
+if added:
+    print(f'  Added {added} glob permission(s)')
+if removed:
+    print(f'  Removed {removed} exact-match memctl entries (superseded by glob)')
+if not added and not removed:
+    print(f'  Permissions already configured')
+" "$SETTINGS_FILE"
+    ok "Bash(memctl *) auto-approved — no per-command prompts"
+fi
+
+# ---------------------------------------------------------------------------
 # Step 6: Validate server
 # ---------------------------------------------------------------------------
 

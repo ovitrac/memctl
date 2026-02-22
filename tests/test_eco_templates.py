@@ -159,3 +159,44 @@ def test_uninstaller_lists_all_commands():
     content = (_scripts_dir() / "uninstall_eco.sh").read_text(encoding="utf-8")
     for name in ["scan.md", "remember.md", "recall.md", "reindex.md", "forget.md"]:
         assert name in content, f"uninstall_eco.sh does not reference {name}"
+
+
+# ---------------------------------------------------------------------------
+# T13-T17: CLI fallback commands are correct (no phantom commands)
+# ---------------------------------------------------------------------------
+
+def test_scan_cli_fallback_uses_sync_and_inspect():
+    """T13: scan.md CLI fallback references memctl sync + memctl inspect."""
+    content = (_templates_dir() / "commands" / "scan.md").read_text(encoding="utf-8")
+    assert "memctl sync" in content
+    assert "memctl inspect" in content
+
+
+def test_recall_cli_fallback_uses_search():
+    """T14: recall.md CLI fallback uses 'memctl search', warns against 'memctl recall'."""
+    content = (_templates_dir() / "commands" / "recall.md").read_text(encoding="utf-8")
+    assert "memctl search" in content
+    # Template should warn that `memctl recall` does not exist
+    assert "NOT" in content and "recall" in content
+
+
+def test_remember_cli_fallback_uses_pull():
+    """T15: remember.md CLI fallback uses 'memctl pull', warns against phantom commands."""
+    content = (_templates_dir() / "commands" / "remember.md").read_text(encoding="utf-8")
+    assert "memctl pull" in content
+    # Template should warn against phantom CLI commands
+    assert "NOT" in content
+
+
+def test_reindex_cli_fallback_uses_reindex():
+    """T16: reindex.md CLI fallback uses 'memctl reindex'."""
+    content = (_templates_dir() / "commands" / "reindex.md").read_text(encoding="utf-8")
+    assert "memctl reindex" in content
+
+
+def test_forget_cli_fallback_uses_reset():
+    """T17: forget.md CLI fallback uses 'memctl reset', warns against 'memctl forget'."""
+    content = (_templates_dir() / "commands" / "forget.md").read_text(encoding="utf-8")
+    assert "memctl reset" in content
+    # Template should warn that `memctl forget` does not exist
+    assert "NOT" in content and "forget" in content

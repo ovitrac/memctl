@@ -199,6 +199,25 @@ if 'UserPromptSubmit' in hooks:
     if not hooks:
         del config['hooks']
 
+# Remove eco permission patterns
+eco_patterns = {
+    'Bash(memctl *)',
+    'Bash(test -f */.claude/eco/.disabled*)',
+    'Bash(rm -f */.claude/eco/.disabled)',
+    'Bash(touch */.claude/eco/.disabled)',
+}
+perms = config.get('permissions', {})
+if 'allow' in perms:
+    before_p = len(perms['allow'])
+    perms['allow'] = [e for e in perms['allow'] if e not in eco_patterns]
+    if len(perms['allow']) < before_p:
+        changed = True
+        print(f'  Removed {before_p - len(perms[\"allow\"])} eco permission(s)')
+    if not perms['allow']:
+        del perms['allow']
+    if not perms:
+        del config['permissions']
+
 # Remove memctl from mcpServers only if no other tools reference it
 # (we do NOT remove MCP server config — that's uninstall_mcp.sh's job)
 

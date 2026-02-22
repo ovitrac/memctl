@@ -4,19 +4,7 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.13.1] — 2026-02-22
-
-### Fixed
-- **Bootstrap DB creation**: `MemoryStore` auto-creates parent directories
-  when opening a disk-backed database. `memctl sync --db .memory/memory.db .`
-  now works without prior `mkdir -p .memory` or `memctl init`.
-- **`/scan` CLI fallback**: template includes correct CLI syntax (positional
-  `path`, not `--path` flag) and explicit MCP-first / CLI-fallback guidance.
-- **`serve --check` install-time safety**: `--check` now validates configuration
-  (imports, db path, version) without opening the database. Previously failed
-  at install time when `.memory/memory.db` did not yet exist.
-
-## [0.13.0] — 2026-02-22
+## [0.13.2] — 2026-02-22
 
 ### Added
 - **`memory_reset` MCP tool (#16)**: truncate all memory content in a single
@@ -34,18 +22,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Bootstrap detection** in eco-hint.sh: 3-way branch (disabled / no-DB / normal).
 - **"First Use" section** in ECO.md with command table + governance rule.
 - **Slash command governance rule**: commands restricted to bootstrap + high-frequency.
+- **Auto-approve memctl CLI** (`install_eco.sh`): adds `Bash(memctl *)` glob
+  permission to `settings.local.json`, eliminating per-command approval prompts.
+  Also adds eco toggle patterns. Uninstaller cleans up on removal.
 
 ### Fixed
+- **Bootstrap DB creation**: `MemoryStore` auto-creates parent directories
+  when opening a disk-backed database. `memctl sync --db .memory/memory.db .`
+  now works without prior `mkdir -p .memory` or `memctl init`.
+- **All 5 slash command templates**: MCP-first with correct CLI fallback syntax.
+  Each template warns against phantom CLI names (`memctl recall` → use
+  `memctl search`, `memctl remember` → use `memctl pull`, `memctl forget` →
+  use `memctl reset`).
+- **`serve --check` install-time safety**: `--check` now validates configuration
+  (imports, db path, version) without opening the database. Previously failed
+  at install time when `.memory/memory.db` did not yet exist.
 - eco-hint normal state is concise (~30 tokens, was ~50).
 - eco.md `/eco on` and `/eco status` now suggest `/scan` when no DB exists.
 
 ### Tests
-
 - `tests/test_memory_reset.py` — 16 tests (R1-R16): store.reset() unit tests,
   MCP-level dry_run/execution/audit, CLI subprocess (--dry-run, --confirm, safety gate).
-- `tests/test_eco_templates.py` — 12 tests (T1-T12): template existence, placeholder
-  validation, MCP tool references, eco-hint config-driven path, installer/uninstaller coverage.
-- **Total: 994 passed, 6 skipped.**
+- `tests/test_eco_templates.py` — 17 tests (T1-T17): template existence, placeholder
+  validation, MCP tool references, eco-hint config-driven path, installer/uninstaller
+  coverage, CLI fallback correctness (T13-T17).
+- **Total: 999 passed, 6 skipped.**
 
 ### Architecture
 - Slash commands are optional UX helpers. All functionality remains available
