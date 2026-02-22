@@ -12,6 +12,35 @@ It remembers what it found, across sessions, without re-exploration.
 eco is a **behavioral layer**, not a mandatory runtime.
 memctl remains usable as a plain CLI without Claude hooks.
 
+Slash commands are **optional UX helpers**. All functionality remains available
+via CLI (`memctl push`, `memctl search`, etc.) and MCP tools (`memory_recall`,
+`memory_inspect`, etc.) without any slash command installed.
+
+## First Use — Slash Commands
+
+After installing eco mode, these slash commands bootstrap and manage memory:
+
+| Command | What it does | MCP tool |
+|---------|-------------|----------|
+| `/scan [path]` | Index a folder (creates DB on first use) | `memory_inspect` |
+| `/recall <query>` | Search memory | `memory_recall` |
+| `/remember <text>` | Store an observation | `memory_propose` |
+| `/reindex [preset]` | Rebuild FTS index (fr/en/raw) | `memory_reindex` |
+| `/forget all` | Reset memory (truncate, preserve mounts) | `memory_reset` |
+
+### Quick start
+
+    /eco on              <- enable eco mode
+    /scan .              <- index current directory (creates DB + mounts + syncs)
+    /recall auth flow    <- search memory
+    /remember "This project uses JWT with 15-min access tokens"
+
+### Command governance
+
+Slash commands cover bootstrap + high-frequency operations only.
+Operations like consolidation, export, import, mount management, and statistics
+are available via CLI and MCP tools directly. They will not become slash commands.
+
 ## Why eco is OFF by default
 
 eco changes Claude's behavior via context injection. Making it default ON creates

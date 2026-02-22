@@ -1258,6 +1258,66 @@ class MemoryStore:
                 "fts_tokenizer_mismatch": mismatch,
             }
 
+    # -- Reset (v0.13) -----------------------------------------------------
+
+    def reset(self, preserve_mounts: bool = True, dry_run: bool = False) -> dict:
+        """Truncate all memory content. Preserves schema and optionally mounts.
+
+        Clears 8 content tables in a single transaction. FTS is cleared
+        automatically via the BEFORE DELETE trigger on memory_items.
+
+        Args:
+            preserve_mounts: Keep memory_mounts table (default True).
+            dry_run: Report counts without deleting (default False).
+
+        Returns:
+            Dict with ``dry_run`` flag and per-table counts of deleted records.
+        """
+        tables_to_clear = [
+            "memory_items",        # triggers auto-clear memory_items_fts
+            "memory_revisions",
+            "memory_embeddings",
+            "memory_links",
+            "memory_palace_locations",
+            "memory_events",
+            "corpus_hashes",
+            "corpus_metadata",
+        ]
+        if not preserve_mounts:
+            tables_to_clear.append("memory_mounts")
+        # schema_meta is NEVER cleared
+
+        if dry_run:
+            counts = {}
+            with self._lock:
+                for table in tables_to_clear:
+                    row = self._conn.execute(
+                        f"SELECT COUNT(*) as cnt FROM {table}"
+                    ).fetchone()
+                    counts[table] = row["cnt"]
+            return {"dry_run": True, **counts}
+
+        counts = {}
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                for table in tables_to_clear:
+                    row = self._conn.execute(
+                        f"SELECT COUNT(*) as cnt FROM {table}"
+                    ).fetchone()
+                    counts[table] = row["cnt"]
+                    self._conn.execute(f"DELETE FROM {table}")
+                # Log the reset event (written AFTER clearing memory_events)
+                self._log_event("reset", None, {
+                    "preserve_mounts": preserve_mounts,
+                    "tables_cleared": len(tables_to_clear),
+                }, "")
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+        return {"dry_run": False, **counts}
+
     # -- Export/Import -----------------------------------------------------
 
     def export_jsonl(self) -> str:

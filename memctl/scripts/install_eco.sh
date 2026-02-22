@@ -6,7 +6,8 @@
 #   2. Registers the MCP server with --db-root (project-scoped)
 #   3. Installs the eco hook (.claude/hooks/eco-hint.sh)
 #   4. Installs the strategy file (.claude/eco/ECO.md)
-#   5. Installs the /eco slash command (.claude/commands/eco.md)
+#   5. Installs slash commands: /eco, /scan, /recall, /remember, /reindex, /forget
+#   5b. Writes eco config (.claude/eco/config.json)
 #   6. Validates server startup
 #   7. Adds .memory/ to .gitignore
 #   8. Reports extraction capabilities
@@ -345,27 +346,60 @@ fi
 # Step 5: Install /eco slash command
 # ---------------------------------------------------------------------------
 
-info "Step 5/8: Installing /eco slash command"
+info "Step 5/9: Installing slash commands"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     info "[dry-run] Would install: $COMMAND_FILE"
+    info "[dry-run] Would install: commands/scan.md, recall.md, remember.md, reindex.md, forget.md"
 else
     mkdir -p "$COMMANDS_DIR"
 
-    # Backup existing
+    # /eco command
     if [[ -f "$COMMAND_FILE" && "$FORCE" == "false" ]]; then
         backup_file "$COMMAND_FILE"
     fi
-
     cp "${ECO_TEMPLATES}/eco.md" "$COMMAND_FILE"
     ok "Slash command installed: $COMMAND_FILE (/eco on|off|status)"
+
+    # Additional commands from templates/eco/commands/
+    for cmd_name in scan.md remember.md recall.md reindex.md forget.md; do
+        src_file="${ECO_TEMPLATES}/commands/${cmd_name}"
+        dst_file="${COMMANDS_DIR}/${cmd_name}"
+        if [[ -f "$src_file" ]]; then
+            if [[ -f "$dst_file" && "$FORCE" == "false" ]]; then
+                backup_file "$dst_file"
+            fi
+            cp "$src_file" "$dst_file"
+            ok "Slash command installed: $dst_file (/${cmd_name%.md})"
+        else
+            warn "Template not found: $src_file"
+        fi
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5b: Write eco config
+# ---------------------------------------------------------------------------
+
+info "Step 5b/9: Writing eco config"
+ECO_CONFIG="${ECO_DIR}/config.json"
+if [[ "$DRY_RUN" == "true" ]]; then
+    info "[dry-run] Would write: $ECO_CONFIG"
+else
+    cat > "$ECO_CONFIG" <<ECOJSON
+{
+  "db_path": "${DB_ROOT}/memory.db",
+  "version": "${MEMCTL_VERSION}"
+}
+ECOJSON
+    ok "Config written: $ECO_CONFIG"
 fi
 
 # ---------------------------------------------------------------------------
 # Step 6: Validate server
 # ---------------------------------------------------------------------------
 
-info "Step 6/8: Validating server"
+info "Step 6/9: Validating server"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     info "[dry-run] Would run: memctl serve --check --db-root $DB_ROOT"
@@ -380,10 +414,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: Update .gitignore
+# Step 7: Update .gitignore
 # ---------------------------------------------------------------------------
 
-info "Step 7/8: Checking .gitignore"
+info "Step 7/9: Checking .gitignore"
 
 GITIGNORE_ENTRY="${DB_ROOT}/"
 
@@ -403,10 +437,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 7: Report extraction capabilities
+# Step 8: Report extraction capabilities
 # ---------------------------------------------------------------------------
 
-info "Step 8/8: Checking extraction capabilities"
+info "Step 8/9: Checking extraction capabilities"
 
 "$PYTHON_CMD" -c "
 import sys
@@ -448,7 +482,8 @@ printf "\n%s%s  eco mode installed%s\n\n" "$C_BOLD" "$C_GREEN" "$C_RESET"
 printf "  DB root:   %s\n" "$DB_ROOT"
 printf "  Hook:      %s\n" "$HOOK_FILE"
 printf "  Strategy:  %s\n" "$ECO_FILE"
-printf "  Command:   %s (/eco on|off|status)\n" "$COMMAND_FILE"
+printf "  Commands:  /eco, /scan, /recall, /remember, /reindex, /forget\n"
+printf "  Config:    %s\n" "${ECO_DIR}/config.json"
 printf "  Settings:  %s\n" "$SETTINGS_FILE"
 printf "\n"
 

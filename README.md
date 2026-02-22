@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.12.4-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-966%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-15%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.13.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-994%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-16%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -711,8 +711,24 @@ bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 | `memory_import` | JSONL import with policy enforcement | v0.7 |
 | `memory_loop` | Bounded recall-answer loop | v0.7 |
 | `memory_reindex` | Rebuild FTS5 index (tokenizer change) | v0.12 |
+| `memory_reset` | Truncate all memory content (audited) | v0.13 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
+
+### Slash Commands (eco mode, v0.13+)
+
+eco mode installs optional slash commands for bootstrap and high-frequency operations:
+
+| Command | Maps to | Role |
+|---------|---------|------|
+| `/scan [path]` | `memory_inspect` | Bootstrap — creates DB + indexes |
+| `/recall <query>` | `memory_recall` | Search memory |
+| `/remember <text>` | `memory_propose` | Store observation |
+| `/reindex [preset]` | `memory_reindex` | Rebuild FTS (preview-first) |
+| `/forget all` | `memory_reset` | Reset memory (preview-first) |
+
+Slash commands are **optional UX helpers**. All functionality remains available
+via CLI and MCP tools without any slash command installed.
 
 ### eco mode (v0.9+)
 

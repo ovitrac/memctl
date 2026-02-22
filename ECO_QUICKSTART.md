@@ -1,6 +1,6 @@
 # eco Mode Quickstart — Claude Code Edition
 
-**Version**: 0.12.0 | **Time to first eco session: ~5 minutes**
+**Version**: 0.13.0 | **Time to first eco session: ~5 minutes**
 
 eco mode replaces Claude's sequential file browsing with deterministic structural
 retrieval and persistent cross-file reasoning. Same questions, better answers, fewer
@@ -64,11 +64,17 @@ your-project/
 │   └── memory.db              ← SQLite + FTS5 + WAL (your knowledge)
 ├── .claude/
 │   ├── hooks/
-│   │   └── eco-hint.sh        ← Injects ~50 tokens per turn when eco is ON
+│   │   └── eco-hint.sh        ← Injects ~30 tokens per turn when eco is ON
 │   ├── eco/
-│   │   └── ECO.md             ← Strategy file Claude reads on demand
+│   │   ├── ECO.md             ← Strategy file Claude reads on demand
+│   │   └── config.json        ← DB path config (written by installer)
 │   └── commands/
-│       └── eco.md             ← /eco slash command behavior
+│       ├── eco.md             ← /eco on|off|status
+│       ├── scan.md            ← /scan [path] — bootstrap
+│       ├── recall.md          ← /recall <query> — search memory
+│       ├── remember.md        ← /remember <text> — store observation
+│       ├── reindex.md         ← /reindex [preset] — rebuild FTS
+│       └── forget.md          ← /forget all — reset memory
 └── .gitignore                 ← Updated: .memory/ excluded
 ```
 
@@ -82,7 +88,7 @@ Start Claude Code in your project:
 claude
 ```
 
-With eco mode enabled, Claude now has 14 `memory_*` MCP tools. Here is what a
+With eco mode enabled, Claude now has 16 `memory_*` MCP tools. Here is what a
 typical first interaction looks like.
 
 ### Step 1: Explore the project structure
@@ -149,8 +155,8 @@ Claude remembers what it learned. No re-exploration.
 
 ## 3. How eco Changes Claude's Behavior
 
-eco mode injects a ~50-token hint every turn via the `UserPromptSubmit` hook. This
-tells Claude that 14 `memory_*` MCP tools are available and preferred for exploration.
+eco mode injects a ~30-token hint every turn via the `UserPromptSubmit` hook. This
+tells Claude that 16 `memory_*` MCP tools are available and preferred for exploration.
 
 Claude still has full access to native `Read`, `Edit`, `Write`, and all other tools.
 eco is **advisory for retrieval, not restrictive for editing**.
@@ -535,9 +541,9 @@ SQLite with FTS5 is very space-efficient.
 | Evaluate eco with your team | [extras/eco/PILOT.md](extras/eco/PILOT.md) |
 | Learn the general memctl CLI | [QUICKSTART.md](QUICKSTART.md) |
 | Set up defense-in-depth hooks | [README.md — Defense in Depth](README.md#defense-in-depth-v08) |
-| See all 14 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
+| See all 16 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
 | Explore the Python API | [README.md — Python API](README.md#python-api) |
 
 ---
 
-*memctl v0.12.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.13.0 — Olivier Vitrac, Adservio Innovation Lab*

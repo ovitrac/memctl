@@ -1,5 +1,5 @@
 """
-memctl MCP Tools — 15 memory tools for MCP integration.
+memctl MCP Tools — 16 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
 Each tool follows the locked middleware order:
@@ -19,7 +19,7 @@ Tool hierarchy:
     FOLDER:     memory_mount, memory_sync, memory_inspect, memory_ask
     DATA:       memory_export, memory_import
     LOOP:       memory_loop
-    ADMIN:      memory_reindex
+    ADMIN:      memory_reindex, memory_reset
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
@@ -60,7 +60,7 @@ def register_memory_tools(
     audit=None,
 ) -> None:
     """
-    Register all 15 memory MCP tools on a FastMCP server instance.
+    Register all 16 memory MCP tools on a FastMCP server instance.
 
     Args:
         mcp: FastMCP server instance.
@@ -1417,8 +1417,69 @@ def register_memory_tools(
             audit.log("memory_reindex", rid, session_id, _audit_db,
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
+    # =====================================================================
+    # ADMIN: reset  (v0.13)
+    # =====================================================================
+
+    @mcp.tool()
+    def memory_reset(
+        preserve_mounts: bool = True,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """Truncate all memory content. Preserves schema and mount config.
+
+        DESTRUCTIVE — all items, events, links, and sync cache are removed.
+        Mount registrations preserved by default (use preserve_mounts=False to clear).
+        Use dry_run=True to preview without deleting.
+
+        Args:
+            preserve_mounts: Keep mount registrations (default True).
+            dry_run: Preview counts without deleting (default False).
+
+        Returns:
+            Per-table counts of deleted (or would-delete) records.
+        """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        try:
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
+
+            result = store.reset(
+                preserve_mounts=preserve_mounts,
+                dry_run=dry_run,
+            )
+
+            total = sum(v for k, v in result.items() if k != "dry_run")
+            detail = {
+                "dry_run": dry_run,
+                "preserve_mounts": preserve_mounts,
+                "total_records": total,
+            }
+
+            return {
+                "status": "dry_run" if dry_run else "ok",
+                "dry_run": dry_run,
+                "preserve_mounts": preserve_mounts,
+                "total_records": total,
+                **{k: v for k, v in result.items() if k != "dry_run"},
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Reset failed: {e}"}
+        finally:
+            audit.log("memory_reset", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
+
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 15 memory MCP tools (with L0/L1 middleware)")
+    logger.info("Registered 16 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------

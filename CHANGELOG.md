@@ -4,6 +4,41 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.0] — 2026-02-22
+
+### Added
+- **`memory_reset` MCP tool (#16)**: truncate all memory content in a single
+  audited transaction. Preserves schema + mount config. Classified as WRITE_TOOL
+  with full middleware (guard → rate limit → execute → audit).
+- **`memctl reset` CLI command**: `--dry-run`, `--confirm`, `--clear-mounts`.
+- **Eco bootstrap slash commands** (5 new):
+  - `/scan [path]` — Index a folder and create memory (`memory_inspect`)
+  - `/recall <query>` — Search memory (`memory_recall`)
+  - `/remember <text>` — Store an observation (`memory_propose`)
+  - `/reindex [preset]` — Rebuild FTS index (`memory_reindex`)
+  - `/forget all` — Reset memory (`memory_reset`)
+- **Eco config file** (`.claude/eco/config.json`): installer persists `db_path`
+  so eco-hint.sh reads the correct path (no hardcoded default).
+- **Bootstrap detection** in eco-hint.sh: 3-way branch (disabled / no-DB / normal).
+- **"First Use" section** in ECO.md with command table + governance rule.
+- **Slash command governance rule**: commands restricted to bootstrap + high-frequency.
+
+### Fixed
+- eco-hint normal state is concise (~30 tokens, was ~50).
+- eco.md `/eco on` and `/eco status` now suggest `/scan` when no DB exists.
+
+### Tests
+
+- `tests/test_memory_reset.py` — 16 tests (R1-R16): store.reset() unit tests,
+  MCP-level dry_run/execution/audit, CLI subprocess (--dry-run, --confirm, safety gate).
+- `tests/test_eco_templates.py` — 12 tests (T1-T12): template existence, placeholder
+  validation, MCP tool references, eco-hint config-driven path, installer/uninstaller coverage.
+- **Total: 994 passed, 6 skipped.**
+
+### Architecture
+- Slash commands are optional UX helpers. All functionality remains available
+  via CLI and MCP tools. memctl is a retrieval engine, not a Claude-first product.
+
 ## [0.12.4] — 2026-02-22
 
 ### Fixed

@@ -1194,6 +1194,46 @@ def cmd_reindex(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: reset  (truncate memory content)
+# ===========================================================================
+
+
+def cmd_reset(args: argparse.Namespace) -> None:
+    """Reset memory — truncate all content, preserve schema."""
+    db_path = _resolve_db(args)
+    confirm = getattr(args, "confirm", False)
+    dry_run = getattr(args, "dry_run", False)
+    clear_mounts = getattr(args, "clear_mounts", False)
+
+    if not dry_run and not confirm:
+        _warn("Safety gate: --confirm is required to execute a reset.")
+        _warn("Use --dry-run to preview what would be deleted.")
+        sys.exit(1)
+
+    store = _open_store(db_path)
+    result = store.reset(
+        preserve_mounts=not clear_mounts,
+        dry_run=dry_run,
+    )
+
+    if result["dry_run"]:
+        _info("Dry run — would delete:")
+        total = 0
+        for table, count in result.items():
+            if table != "dry_run" and count > 0:
+                _info(f"  {table}: {count}")
+                total += count
+        _info(f"  Total: {total} records")
+    else:
+        total = sum(v for k, v in result.items() if k != "dry_run")
+        _info(f"Reset complete. Cleared {total} records.")
+        if not clear_mounts:
+            _info("Mount registrations preserved.")
+
+    store.close()
+
+
+# ===========================================================================
 # Command: scripts-path  (print bundled scripts location)
 # ===========================================================================
 
@@ -1651,6 +1691,25 @@ def main() -> None:
         help="Show plan without executing",
     )
     p_reindex.set_defaults(func=cmd_reindex)
+
+    # -- reset -------------------------------------------------------------
+    p_reset = sub.add_parser(
+        "reset", parents=[_common],
+        help="Truncate all memory content (preserves schema + mounts)",
+    )
+    p_reset.add_argument(
+        "--confirm", action="store_true", default=False,
+        help="Required to execute the reset (safety gate)",
+    )
+    p_reset.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Preview what would be deleted without executing",
+    )
+    p_reset.add_argument(
+        "--clear-mounts", action="store_true", default=False,
+        help="Also clear mount registrations (default: preserve)",
+    )
+    p_reset.set_defaults(func=cmd_reset)
 
     # -- scripts-path ------------------------------------------------------
 

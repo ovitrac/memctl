@@ -122,6 +122,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Remove additional slash commands installed by eco
+# ---------------------------------------------------------------------------
+
+for cmd_name in scan.md remember.md recall.md reindex.md forget.md; do
+    cmd_file="${CLAUDE_DIR}/commands/${cmd_name}"
+    if [[ -f "$cmd_file" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            info "[dry-run] Would remove: $cmd_file"
+        else
+            rm "$cmd_file"
+            ok "Removed: $cmd_file"
+        fi
+        REMOVED=$((REMOVED + 1))
+    fi
+done
+
+# ---------------------------------------------------------------------------
+# Remove eco config
+# ---------------------------------------------------------------------------
+
+ECO_CONFIG="${ECO_DIR}/config.json"
+if [[ -f "$ECO_CONFIG" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        info "[dry-run] Would remove: $ECO_CONFIG"
+    else
+        rm "$ECO_CONFIG"
+        ok "Removed: $ECO_CONFIG"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Remove UserPromptSubmit hook registration from settings
 # ---------------------------------------------------------------------------
 
