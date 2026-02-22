@@ -362,7 +362,7 @@ else
     ok "Slash command installed: $COMMAND_FILE (/eco on|off|status)"
 
     # Additional commands from templates/eco/commands/
-    for cmd_name in scan.md remember.md recall.md reindex.md forget.md consolidate.md status.md export.md; do
+    for cmd_name in scan.md remember.md recall.md reindex.md forget.md consolidate.md status.md export.md diff.md; do
         src_file="${ECO_TEMPLATES}/commands/${cmd_name}"
         dst_file="${COMMANDS_DIR}/${cmd_name}"
         if [[ -f "$src_file" ]]; then
@@ -427,11 +427,9 @@ if 'allow' not in config['permissions']:
 allow = config['permissions']['allow']
 
 # Glob patterns for eco mode CLI operations
+# Note: .memory/.eco-disabled is outside .claude/ — no sensitive-file prompts
 eco_patterns = [
     'Bash(memctl *)',
-    'Bash(test -f */.claude/eco/.disabled*)',
-    'Bash(rm -f */.claude/eco/.disabled)',
-    'Bash(touch */.claude/eco/.disabled)',
 ]
 
 added = 0

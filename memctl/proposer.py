@@ -197,3 +197,40 @@ class MemoryProposer:
             logger.info(f"Extracted {len(proposals)} memory proposal(s)")
 
         return cleaned, proposals
+
+    def parse(
+        self,
+        text: str = "",
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[str, List[MemoryProposal]]:
+        """
+        Unified parse dispatcher — single entry point for all parse strategies.
+
+        Priority order:
+          1. Tool calls (structured side channel)
+          2. JSON stdin (raw JSON array/object)
+          3. Delimiter blocks (<MEMORY_PROPOSALS_JSON>...</MEMORY_PROPOSALS_JSON>)
+          4. Fallback: return (text, [])
+
+        Returns (cleaned_text, proposals).
+        """
+        # Priority 1: tool calls
+        if tool_calls:
+            proposals = self.parse_tool_calls(tool_calls)
+            if proposals:
+                return text, proposals
+
+        # Priority 2: JSON stdin
+        if text:
+            _, json_proposals = self.parse_json_stdin(text)
+            if json_proposals:
+                return "", json_proposals
+
+        # Priority 3: delimiter blocks
+        if text:
+            cleaned, delim_proposals = self.parse_response_text(text)
+            if delim_proposals:
+                return cleaned, delim_proposals
+
+        # Priority 4: fallback
+        return text, []

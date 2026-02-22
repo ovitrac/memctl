@@ -1,5 +1,5 @@
 """
-memctl MCP Tools — 16 memory tools for MCP integration.
+memctl MCP Tools — 18 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
 Each tool follows the locked middleware order:
@@ -16,6 +16,7 @@ Tool hierarchy:
     WRITE:      memory_propose   — governed write, memory_write — privileged
     CRUD:       memory_read      — read by IDs
     LIFECYCLE:  memory_consolidate, memory_stats
+    COMPARE:    memory_diff
     FOLDER:     memory_mount, memory_sync, memory_inspect, memory_ask
     DATA:       memory_export, memory_import
     LOOP:       memory_loop
@@ -60,7 +61,7 @@ def register_memory_tools(
     audit=None,
 ) -> None:
     """
-    Register all 16 memory MCP tools on a FastMCP server instance.
+    Register all 18 memory MCP tools on a FastMCP server instance.
 
     Args:
         mcp: FastMCP server instance.
@@ -748,7 +749,15 @@ def register_memory_tools(
         try:
             # Eco mode state
             eco_config_path = Path(".claude/eco/config.json")
-            eco_disabled = Path(".claude/eco/.disabled")
+            eco_disabled = Path(".memory/.eco-disabled")
+            # Backward compat: migrate old flag location
+            old_eco_disabled = Path(".claude/eco/.disabled")
+            if old_eco_disabled.exists() and not eco_disabled.exists():
+                try:
+                    eco_disabled.parent.mkdir(parents=True, exist_ok=True)
+                    old_eco_disabled.rename(eco_disabled)
+                except OSError:
+                    pass
             eco_state = "disabled" if eco_disabled.exists() else (
                 "active" if eco_config_path.exists() else "not installed"
             )
@@ -788,6 +797,75 @@ def register_memory_tools(
         finally:
             audit.log("memory_status", rid, session_id, _audit_db,
                       outcome, {}, (time.monotonic() - t0) * 1000)
+
+    # =====================================================================
+    # COMPARE: memory_diff  (v0.15)
+    # =====================================================================
+
+    @mcp.tool()
+    def memory_diff(
+        id1: str,
+        id2: str = "",
+        revision: int = 0,
+    ) -> Dict[str, Any]:
+        """Compare two memory items or an item against a past revision.
+
+        Produces a unified content diff, metadata change summary, and
+        similarity score. Read-only — no mutations.
+
+        Args:
+            id1: First item ID (required).
+            id2: Second item ID (item-vs-item mode). Empty = revision mode.
+            revision: Compare against specific revision number.
+                      0 = latest revision (when id2 is empty).
+
+        Returns:
+            content_diff: Unified diff lines.
+            metadata_changes: List of {field, old, new} for changed metadata.
+            similarity_score: Float in [0.0, 1.0].
+            identical: True if content and metadata match.
+        """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {"id1": id1}
+        try:
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            from memctl.diff import compute_diff, resolve_diff_targets
+
+            item_a, item_b, label_a, label_b = resolve_diff_targets(
+                store, id1, id2=id2, revision=revision,
+            )
+            result = compute_diff(
+                item_a, item_b, label_a=label_a, label_b=label_b,
+            )
+
+            detail["identical"] = result["identical"]
+            return {
+                "status": "ok",
+                "label_a": label_a,
+                "label_b": label_b,
+                "identical": result["identical"],
+                "similarity_score": result["similarity_score"],
+                "content_diff": result["content_diff"],
+                "metadata_changes": result["metadata_changes"],
+            }
+
+        except ValueError as e:
+            outcome = "error"
+            return {"status": "error", "message": str(e)}
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Diff failed: {e}"}
+        finally:
+            audit.log("memory_diff", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # FOLDER: mount, sync, inspect, ask  (v0.7)
@@ -1540,7 +1618,7 @@ def register_memory_tools(
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 16 memory MCP tools (with L0/L1 middleware)")
+    logger.info("Registered 18 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------

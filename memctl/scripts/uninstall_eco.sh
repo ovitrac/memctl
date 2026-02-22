@@ -125,7 +125,7 @@ fi
 # Remove additional slash commands installed by eco
 # ---------------------------------------------------------------------------
 
-for cmd_name in scan.md remember.md recall.md reindex.md forget.md consolidate.md status.md export.md; do
+for cmd_name in scan.md remember.md recall.md reindex.md forget.md consolidate.md status.md export.md diff.md; do
     cmd_file="${CLAUDE_DIR}/commands/${cmd_name}"
     if [[ -f "$cmd_file" ]]; then
         if [[ "$DRY_RUN" == "true" ]]; then
@@ -202,9 +202,6 @@ if 'UserPromptSubmit' in hooks:
 # Remove eco permission patterns
 eco_patterns = {
     'Bash(memctl *)',
-    'Bash(test -f */.claude/eco/.disabled*)',
-    'Bash(rm -f */.claude/eco/.disabled)',
-    'Bash(touch */.claude/eco/.disabled)',
 }
 perms = config.get('permissions', {})
 if 'allow' in perms:

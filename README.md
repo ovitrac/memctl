@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.14.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-1029%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-17%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.15.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1063%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-18%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -199,6 +199,7 @@ memctl <command> [options]
 | `chat --llm CMD` | Interactive memory-backed chat REPL |
 | `export [--tier T]` | Export memory items as JSONL to stdout |
 | `import [FILE]` | Import memory items from JSONL file or stdin |
+| `diff ID1 [ID2]` | Compare two items or item vs revision |
 | `serve` | Start MCP server (requires `memctl[mcp]`) |
 
 ### Global Flags
@@ -714,6 +715,7 @@ bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 | `memory_reindex` | Rebuild FTS5 index (tokenizer change) | v0.12 |
 | `memory_reset` | Truncate all memory content (audited) | v0.13 |
 | `memory_status` | Project memory health dashboard | v0.14 |
+| `memory_diff` | Compare two items or item vs revision | v0.15 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
@@ -731,6 +733,7 @@ eco mode installs optional slash commands for bootstrap and high-frequency opera
 | `/consolidate` | `memory_consolidate` | Merge similar items (preview-first) |
 | `/status` | `memory_status` | Project memory health dashboard |
 | `/export [--tier T]` | `memory_export` | Export memory as JSONL |
+| `/diff ID1 [ID2]` | `memory_diff` | Compare items or revisions |
 
 Slash commands are **optional UX helpers**. All functionality remains available
 via CLI and MCP tools without any slash command installed.

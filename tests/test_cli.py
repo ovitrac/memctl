@@ -969,3 +969,141 @@ class TestReindexEcoConfig:
         updated = json.loads(eco_config.read_text())
         assert "fts_tokenizer" in updated
         assert "porter" in updated["fts_tokenizer"]
+
+
+# ---------------------------------------------------------------------------
+# status — eco flag relocation (F1-T1, F1-T2)
+# ---------------------------------------------------------------------------
+
+
+class TestStatusEcoFlag:
+    """Tests for eco disabled flag at .memory/.eco-disabled (v0.15.1)."""
+
+    # Project root needed in PYTHONPATH when cwd changes away from it.
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def test_f1_t1_new_flag_reports_disabled(self, tmp_path):
+        """F1-T1: .memory/.eco-disabled → status reports 'disabled'."""
+        db = str(tmp_path / ".memory" / "memory.db")
+        run(["init", str(tmp_path / ".memory")])
+        # Create the new-location flag
+        flag = tmp_path / ".memory" / ".eco-disabled"
+        flag.touch()
+        # Also create eco config so eco would be "active" without the flag
+        eco_dir = tmp_path / ".claude" / "eco"
+        eco_dir.mkdir(parents=True, exist_ok=True)
+        (eco_dir / "config.json").write_text('{"db_path": "x"}')
+        r = run(["status", "--db", db, "--json"], cwd=str(tmp_path),
+                env={"PYTHONPATH": self._PROJECT_ROOT})
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["eco_mode"] == "disabled"
+
+    def test_f1_t2_old_flag_migrated(self, tmp_path):
+        """F1-T2: Old .claude/eco/.disabled migrates to .memory/.eco-disabled."""
+        db = str(tmp_path / ".memory" / "memory.db")
+        run(["init", str(tmp_path / ".memory")])
+        # Create old-location flag
+        old_dir = tmp_path / ".claude" / "eco"
+        old_dir.mkdir(parents=True, exist_ok=True)
+        (old_dir / ".disabled").touch()
+        (old_dir / "config.json").write_text('{"db_path": "x"}')
+        new_flag = tmp_path / ".memory" / ".eco-disabled"
+        assert not new_flag.exists()
+        r = run(["status", "--db", db, "--json"], cwd=str(tmp_path),
+                env={"PYTHONPATH": self._PROJECT_ROOT})
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["eco_mode"] == "disabled"
+        # Old flag should be gone, new flag should exist
+        assert new_flag.exists()
+        assert not (old_dir / ".disabled").exists()
+
+
+# ---------------------------------------------------------------------------
+# diff (D15–D19)
+# ---------------------------------------------------------------------------
+
+
+class TestDiffCLI:
+    """Tests for memctl diff command (v0.15)."""
+
+    def _write_two_items(self, db):
+        """Helper: write two items via pull, return their IDs."""
+        items = [
+            {"content": "Alpha item content.", "type": "fact", "title": "Alpha"},
+            {"content": "Beta item content.", "type": "note", "title": "Beta"},
+        ]
+        r = run(["pull", "--db", db, "-q"], stdin=json.dumps(items))
+        assert r.returncode == 0
+        # Extract IDs from stats
+        r2 = run(["search", "Alpha", "--db", db, "--json", "-q"])
+        assert r2.returncode == 0
+        results = json.loads(r2.stdout)
+        id1 = results[0]["id"]
+        r3 = run(["search", "Beta", "--db", db, "--json", "-q"])
+        assert r3.returncode == 0
+        results2 = json.loads(r3.stdout)
+        id2 = results2[0]["id"]
+        return id1, id2
+
+    def test_d15_diff_two_items(self, db):
+        """D15: memctl diff ID1 ID2 → exit 0, human output."""
+        id1, id2 = self._write_two_items(db)
+        r = run(["diff", id1, id2, "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "Diff:" in r.stdout or "identical" in r.stdout
+
+    def test_d16_diff_json_output(self, db):
+        """D16: memctl diff ID1 ID2 --json → valid JSON."""
+        id1, id2 = self._write_two_items(db)
+        r = run(["diff", id1, id2, "--db", db, "--json", "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["status"] == "ok"
+        assert "similarity_score" in data
+        assert "content_diff" in data
+
+    def test_d17_diff_missing_items(self, db):
+        """D17: memctl diff MEM-nope MEM-nope → exit 1."""
+        r = run(["diff", "MEM-nope", "MEM-nope2", "--db", db, "-q"])
+        assert r.returncode == 1
+
+    def test_d18_diff_same_item(self, db):
+        """D18: memctl diff ID1 ID1 → shows 'identical'."""
+        id1, _ = self._write_two_items(db)
+        r = run(["diff", id1, id1, "--db", db, "-q"])
+        assert r.returncode == 0
+        assert "identical" in r.stdout.lower()
+
+    def test_d19_diff_latest_revision(self, db):
+        """D19: Write + update item, memctl diff ID --latest → shows diff."""
+        # Write an item
+        items = [{"content": "original content v1", "type": "fact", "title": "Evolving"}]
+        r = run(["pull", "--db", db, "-q"], stdin=json.dumps(items))
+        assert r.returncode == 0
+
+        # Find it
+        r2 = run(["search", "Evolving", "--db", db, "--json", "-q"])
+        results = json.loads(r2.stdout)
+        item_id = results[0]["id"]
+
+        # Update it (write again with same title but different content via pull)
+        # Use the store directly for update — use Python subprocess to ensure revision
+        update_script = (
+            f"import sys; sys.path.insert(0, '.'); "
+            f"from memctl.store import MemoryStore; "
+            f"s = MemoryStore(db_path='{db}'); "
+            f"s.update_item('{item_id}', {{'content': 'modified content v2'}}); "
+            f"s.close()"
+        )
+        r3 = subprocess.run(
+            [sys.executable, "-c", update_script],
+            capture_output=True, text=True,
+        )
+        assert r3.returncode == 0, f"update failed: {r3.stderr}"
+
+        # Now diff --latest
+        r4 = run(["diff", item_id, "--latest", "--db", db, "-q"])
+        assert r4.returncode == 0
+        assert "original" in r4.stdout or "modified" in r4.stdout or "Diff:" in r4.stdout

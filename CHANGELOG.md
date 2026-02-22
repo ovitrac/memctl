@@ -4,6 +4,56 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.1] — 2026-02-22
+
+### Fixed
+- **F1: Eco toggle no longer triggers Claude Code sensitive-file prompt.**
+  Flag relocated from `.claude/eco/.disabled` → `.memory/.eco-disabled`.
+  Backward-compatible: old flag auto-migrated on first `memctl status` or
+  `memory_status` call. Three `.claude/`-path permission patterns removed
+  from install/uninstall scripts (no longer needed).
+- **F2: Clarified `push` vs `pull` CLI help text.**
+  `push` now reads "Ingest files (--source) + recall query → injection block on stdout".
+  `pull` now reads "Store text from stdin as memory items (pipe from LLM or echo)".
+- **F3: Improved CLI discoverability for `show` and `inspect`.**
+  `show` help now includes example (`memctl show MEM-abc123`) and `MEM-ID` metavar.
+  `inspect` help now clarifies it takes a folder path, not a memory ID.
+
+### Tests
+- F1-T1: `.memory/.eco-disabled` flag → status reports "disabled".
+- F1-T2: Old `.claude/eco/.disabled` auto-migrated to new location.
+
+## [0.15.0] — 2026-02-22
+
+### Added
+- **Unified `parse()` dispatcher** in `MemoryProposer`: single entry point for all
+  parse strategies. Priority: tool calls → JSON stdin → delimiter → fallback.
+  Replaces hand-wired 3-tier chain in `cmd_pull()` with one-liner.
+- **`memctl diff` CLI command**: compare two items or an item against a past revision.
+  Supports `--json`, `--revision N`, and `--latest` flags. Uses `difflib.unified_diff`
+  (stdlib) for content and field-by-field metadata comparison.
+- **`memory_diff` MCP tool (#18)**: read-only diff via MCP. Full middleware wiring
+  (guard → rate limit → execute → audit). Returns content_diff, metadata_changes,
+  similarity_score, identical flag.
+- **`/diff` slash command**: eco template with MCP primary + CLI fallback pattern.
+  Read-only, warns against phantom `memctl compare`.
+- **`memctl/diff.py` module** (~130 LOC): `compute_diff()` and `resolve_diff_targets()`
+  using `difflib.unified_diff` + `memctl.similarity`.
+
+### Changed
+- `cmd_pull()` now uses `proposer.parse()` instead of manual 3-tier chain.
+- MCP tool count: 17 → 18 (`memory_diff` added).
+- Slash command count: 8 → 9 (`/diff` added).
+- Install/uninstall loops: 8 → 9 commands.
+
+### Tests
+- `tests/test_proposer.py` — 8 new tests (UP1-UP8): unified parse() priority ordering.
+- `tests/test_diff.py` — 14 new tests (D1-D14): compute_diff, resolve_diff_targets.
+- `tests/test_cli.py` — 5 new tests (D15-D19): diff CLI human/JSON/missing/identical/latest.
+- `tests/test_mcp_tools.py` — 3 new tests (D20-D24): 18 tools, memory_diff OK/error/identical.
+- `tests/test_eco_templates.py` — 4 new tests (D25-D28): diff template existence, MCP ref,
+  CLI fallback, read-only marker. ALL_COMMANDS updated to 9.
+
 ## [0.14.0] — 2026-02-22
 
 ### Added

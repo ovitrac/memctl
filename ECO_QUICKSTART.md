@@ -1,6 +1,6 @@
 # eco Mode Quickstart — Claude Code Edition
 
-**Version**: 0.14.0 | **Time to first eco session: ~5 minutes**
+**Version**: 0.15.0 | **Time to first eco session: ~5 minutes**
 
 eco mode replaces Claude's sequential file browsing with deterministic structural
 retrieval and persistent cross-file reasoning. Same questions, better answers, fewer
@@ -385,7 +385,7 @@ This is one of eco mode's strongest advantages over vanilla Claude Code.
 /eco status   Check state + show memory stats
 ```
 
-The toggle is instant — it creates or removes a flag file (`.claude/eco/.disabled`).
+The toggle is instant — it creates or removes a flag file (`.memory/.eco-disabled`).
 No subprocess, no restart needed.
 
 ### Customization
@@ -525,7 +525,7 @@ SQLite with FTS5 is very space-efficient.
 | Stale results after code change | Database not re-synced | `memctl sync` or `memory_sync()` via MCP |
 | `.docx` / `.pdf` not searchable | Docs extra or poppler missing | `pip install "memctl[docs]"` and/or `sudo apt install poppler-utils` |
 | `memory_inspect` returns empty | Folder not mounted or empty | `memctl mount PATH && memctl sync PATH` |
-| eco OFF after restart | `.claude/eco/.disabled` exists | `/eco on` or `rm .claude/eco/.disabled` |
+| eco OFF after restart | `.memory/.eco-disabled` exists | `/eco on` or `rm .memory/.eco-disabled` |
 | Hook error in Claude Code | Syntax error in hook script | Check `bash -n .claude/hooks/eco-hint.sh` for parse errors |
 | MCP server not starting | Wrong db path or mcp not installed | `memctl serve --check --db .memory/memory.db` |
 | Knowledge lost between sessions | Database deleted or moved | Check `.memory/memory.db` exists; re-sync if needed |
@@ -541,9 +541,9 @@ SQLite with FTS5 is very space-efficient.
 | Evaluate eco with your team | [extras/eco/PILOT.md](extras/eco/PILOT.md) |
 | Learn the general memctl CLI | [QUICKSTART.md](QUICKSTART.md) |
 | Set up defense-in-depth hooks | [README.md — Defense in Depth](README.md#defense-in-depth-v08) |
-| See all 17 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
+| See all 18 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
 | Explore the Python API | [README.md — Python API](README.md#python-api) |
 
 ---
 
-*memctl v0.14.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.15.0 — Olivier Vitrac, Adservio Innovation Lab*

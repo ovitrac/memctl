@@ -64,7 +64,7 @@ eco mode is ON by default. Toggle it live with the `/eco` slash command:
 /eco           → Same as /eco status
 ```
 
-**Mechanism:** The hook checks for `.claude/eco/.disabled`. If the file exists,
+**Mechanism:** The hook checks for `.memory/.eco-disabled`. If the file exists,
 the hook injects empty context (eco OFF). If absent, eco context is injected (eco ON).
 This is a single syscall — no subprocess, no DB query, no latency.
 

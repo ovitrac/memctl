@@ -24,16 +24,16 @@ def _scripts_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# T1: All 8 command files exist
+# T1: All 9 command files exist
 # ---------------------------------------------------------------------------
 
 ALL_COMMANDS = [
     "scan.md", "remember.md", "recall.md", "reindex.md", "forget.md",
-    "consolidate.md", "status.md", "export.md",
+    "consolidate.md", "status.md", "export.md", "diff.md",
 ]
 
 def test_all_command_files_exist():
-    """T1: All 8 command files exist in templates/eco/commands/."""
+    """T1: All 9 command files exist in templates/eco/commands/."""
     commands_dir = _templates_dir() / "commands"
     for name in ALL_COMMANDS:
         assert (commands_dir / name).is_file(), f"Missing command template: {name}"
@@ -273,3 +273,30 @@ def test_export_cli_fallback():
     """T27: export.md CLI fallback uses 'memctl export'."""
     content = (_templates_dir() / "commands" / "export.md").read_text(encoding="utf-8")
     assert "memctl export" in content
+
+
+# ---------------------------------------------------------------------------
+# T28-T31: /diff template (v0.15)
+# ---------------------------------------------------------------------------
+
+def test_d25_diff_exists():
+    """D25: diff.md exists in templates/eco/commands/."""
+    assert (_templates_dir() / "commands" / "diff.md").is_file()
+
+
+def test_d26_diff_references_memory_diff():
+    """D26: diff.md references memory_diff."""
+    content = (_templates_dir() / "commands" / "diff.md").read_text(encoding="utf-8")
+    assert "memory_diff" in content
+
+
+def test_d27_diff_cli_fallback():
+    """D27: diff.md CLI fallback uses 'memctl diff'."""
+    content = (_templates_dir() / "commands" / "diff.md").read_text(encoding="utf-8")
+    assert "memctl diff" in content
+
+
+def test_d28_diff_read_only():
+    """D28: diff.md contains 'read-only'."""
+    content = (_templates_dir() / "commands" / "diff.md").read_text(encoding="utf-8")
+    assert "read-only" in content

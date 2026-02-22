@@ -3,15 +3,15 @@
 #
 # Hook event: UserPromptSubmit
 # Overhead: ~50 tokens per turn when enabled, 0 when disabled
-# Toggle: touch/rm .claude/eco/.disabled (single syscall, no subprocess)
+# Toggle: touch/rm .memory/.eco-disabled (single syscall, no subprocess)
 #
 # Default: ON (no flag file = enabled)
-# /eco off → creates .claude/eco/.disabled → hook injects empty context
-# /eco on  → removes .claude/eco/.disabled → hook injects eco hint
+# /eco off → creates .memory/.eco-disabled → hook injects empty context
+# /eco on  → removes .memory/.eco-disabled → hook injects eco hint
 #
 # Author: Olivier Vitrac, PhD, HDR | Adservio Innovation Lab
 
-if [ -f ".claude/eco/.disabled" ]; then
+if [ -f ".memory/.eco-disabled" ]; then
   echo '{"additionalContext": ""}'
 else
   cat <<'JSON'

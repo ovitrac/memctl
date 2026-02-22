@@ -2,7 +2,7 @@
 # eco-hint.sh — Inject eco mode hint into Claude Code context
 #
 # Hook event: UserPromptSubmit
-# Toggle: touch/rm .claude/eco/.disabled
+# Toggle: touch/rm .memory/.eco-disabled
 #
 # 3-way branch:
 #   1. Disabled  → empty context
@@ -18,7 +18,7 @@ if [ -f "$ECO_CONFIG" ]; then
 fi
 DB_PATH="${DB_PATH:-.memory/memory.db}"
 
-if [ -f ".claude/eco/.disabled" ]; then
+if [ -f ".memory/.eco-disabled" ]; then
   echo '{"additionalContext": ""}'
 elif [ ! -f "$DB_PATH" ]; then
   cat <<'JSON'

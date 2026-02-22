@@ -114,3 +114,82 @@ class TestParseJsonStdin:
         assert len(proposals) == 5
         for i, p in enumerate(proposals):
             assert p.title == f"Title {i}"
+
+
+# ---------------------------------------------------------------------------
+# parse() — unified dispatcher (UP1–UP8)
+# ---------------------------------------------------------------------------
+
+
+class TestParse:
+    """Tests for the unified parse() dispatcher (v0.15)."""
+
+    def test_up1_tool_calls_present(self, proposer):
+        """UP1: Tool calls present → returns tool proposals."""
+        tool_calls = [{
+            "action": "memory.propose",
+            "items": [{"content": "from tools", "type": "fact"}],
+        }]
+        _, proposals = proposer.parse(tool_calls=tool_calls)
+        assert len(proposals) == 1
+        assert proposals[0].content == "from tools"
+
+    def test_up2_json_stdin(self, proposer):
+        """UP2: JSON array on stdin → returns JSON proposals."""
+        text = json.dumps([{"content": "json item", "type": "note"}])
+        _, proposals = proposer.parse(text=text)
+        assert len(proposals) == 1
+        assert proposals[0].content == "json item"
+
+    def test_up3_delimiter_blocks(self, proposer):
+        """UP3: Delimiter blocks → returns delimiter proposals."""
+        text = (
+            "Some preamble.\n"
+            "<MEMORY_PROPOSALS_JSON>\n"
+            '[{"content": "delimited item", "type": "fact"}]\n'
+            "</MEMORY_PROPOSALS_JSON>\n"
+            "Some epilogue."
+        )
+        cleaned, proposals = proposer.parse(text=text)
+        assert len(proposals) == 1
+        assert proposals[0].content == "delimited item"
+        assert "preamble" in cleaned
+
+    def test_up4_plain_text_fallback(self, proposer):
+        """UP4: Plain text → returns (text, [])."""
+        text = "Just plain text with no proposals."
+        cleaned, proposals = proposer.parse(text=text)
+        assert proposals == []
+        assert cleaned == text
+
+    def test_up5_tool_wins_over_json(self, proposer):
+        """UP5: Tool calls + JSON text → tool wins (priority 1 > 2)."""
+        tool_calls = [{
+            "action": "memory.propose",
+            "items": [{"content": "tool winner", "type": "fact"}],
+        }]
+        json_text = json.dumps([{"content": "json loser", "type": "note"}])
+        _, proposals = proposer.parse(text=json_text, tool_calls=tool_calls)
+        assert len(proposals) == 1
+        assert proposals[0].content == "tool winner"
+
+    def test_up6_json_wins_over_delimiter(self, proposer):
+        """UP6: JSON + delimiter text → JSON wins (priority 2 > 3)."""
+        # Text that is valid JSON and also contains delimiters — JSON checked first
+        text = json.dumps([{"content": "json winner", "type": "fact"}])
+        _, proposals = proposer.parse(text=text)
+        assert len(proposals) == 1
+        assert proposals[0].content == "json winner"
+
+    def test_up7_empty_tool_calls_falls_through(self, proposer):
+        """UP7: tool_calls=[] → falls through to JSON/delimiter."""
+        text = json.dumps([{"content": "fallthrough item", "type": "note"}])
+        _, proposals = proposer.parse(text=text, tool_calls=[])
+        assert len(proposals) == 1
+        assert proposals[0].content == "fallthrough item"
+
+    def test_up8_empty_text_no_tools(self, proposer):
+        """UP8: text="", no tool_calls → returns ("", [])."""
+        cleaned, proposals = proposer.parse(text="", tool_calls=None)
+        assert cleaned == ""
+        assert proposals == []

@@ -9,6 +9,7 @@ Commands:
     memctl show   <id>                       — display single memory item
     memctl stats                             — store metrics
     memctl status                            — project memory health dashboard
+    memctl diff   <id1> [<id2>] [--json]     — compare two items or item vs revision
     memctl consolidate [--dry-run]           — merge + promote STM items
     memctl loop   "query" --llm CMD          — bounded recall-answer loop
     memctl mount  <path> [--name N]          — register folder for sync
@@ -330,16 +331,12 @@ def cmd_pull(args: argparse.Namespace) -> None:
     session_id = _env_str("MEMCTL_SESSION", "")
     source_id = f"memctl-pull:{session_id}" if session_id else "memctl-pull"
 
-    # Attempt structured proposal extraction (3-tier: JSON → delimiters → fallback)
+    # Attempt structured proposal extraction via unified parse()
     proposals = []
     try:
         from memctl.proposer import MemoryProposer
         proposer = MemoryProposer()
-        # Tier 1: raw JSON array (e.g., from /remember CLI fallback)
-        _, proposals = proposer.parse_json_stdin(text)
-        # Tier 2: delimiter-wrapped proposals
-        if not proposals:
-            _, proposals = proposer.parse_response_text(text)
+        _, proposals = proposer.parse(text)
     except Exception as e:
         logger.debug("Proposer parse failed: %s", e)
 
@@ -579,7 +576,17 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     # 1. Eco mode state
     eco_config_path = Path(".claude/eco/config.json")
-    eco_disabled = Path(".claude/eco/.disabled")
+    eco_disabled = Path(".memory/.eco-disabled")
+    # Backward compat: migrate old flag location (.claude/ triggers prompts)
+    old_eco_disabled = Path(".claude/eco/.disabled")
+    if old_eco_disabled.exists() and not eco_disabled.exists():
+        try:
+            eco_disabled.parent.mkdir(parents=True, exist_ok=True)
+            old_eco_disabled.rename(eco_disabled)
+            print("  [migrated] .claude/eco/.disabled → .memory/.eco-disabled",
+                  file=sys.stderr)
+        except OSError:
+            pass
     eco_state = "disabled" if eco_disabled.exists() else (
         "active" if eco_config_path.exists() else "not installed"
     )
@@ -647,6 +654,75 @@ def cmd_status(args: argparse.Namespace) -> None:
         if last_scan:
             print(f"  Last scan: {last_scan}")
         print(f"  Events:    {stats['events_count']}")
+
+
+# ===========================================================================
+# Command: diff  (compare two items or item vs revision)
+# ===========================================================================
+
+
+def cmd_diff(args: argparse.Namespace) -> None:
+    """Compare two memory items or an item against a past revision."""
+    from memctl.diff import compute_diff, resolve_diff_targets
+
+    db_path = _resolve_db(args)
+    store = _open_store(db_path)
+
+    id1 = args.id1
+    id2 = getattr(args, "id2", None) or ""
+    revision = getattr(args, "revision", 0) or 0
+    latest = getattr(args, "latest", False)
+
+    try:
+        if latest and not id2:
+            # --latest: item vs most recent revision (revision=0, id2="")
+            item_a, item_b, label_a, label_b = resolve_diff_targets(
+                store, id1,
+            )
+        elif revision > 0:
+            item_a, item_b, label_a, label_b = resolve_diff_targets(
+                store, id1, revision=revision,
+            )
+        else:
+            item_a, item_b, label_a, label_b = resolve_diff_targets(
+                store, id1, id2=id2,
+            )
+    except ValueError as e:
+        _warn(str(e))
+        store.close()
+        sys.exit(1)
+
+    result = compute_diff(item_a, item_b, label_a=label_a, label_b=label_b)
+
+    if getattr(args, "json", False):
+        output = {
+            "status": "ok",
+            "label_a": label_a,
+            "label_b": label_b,
+            "identical": result["identical"],
+            "similarity_score": result["similarity_score"],
+            "content_diff": result["content_diff"],
+            "metadata_changes": result["metadata_changes"],
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+    else:
+        if result["identical"]:
+            print(f"Items are identical ({label_a} vs {label_b})")
+        else:
+            print(f"Diff: {label_a} vs {label_b}")
+            print(f"Similarity: {result['similarity_score']:.4f}")
+            if result["content_diff"]:
+                print()
+                for line in result["content_diff"]:
+                    print(line, end="")
+                if result["content_diff"] and not result["content_diff"][-1].endswith("\n"):
+                    print()
+            if result["metadata_changes"]:
+                print("\nMetadata changes:")
+                for change in result["metadata_changes"]:
+                    print(f"  {change['field']}: {change['old']} → {change['new']}")
+
+    store.close()
 
 
 # ===========================================================================
@@ -1486,12 +1562,12 @@ def main() -> None:
     # -- push --------------------------------------------------------------
     p_push = sub.add_parser(
         "push", parents=[_common],
-        help="Ingest + recall in one shot (injection block \u2192 stdout)",
+        help="Ingest files (--source) + recall query \u2192 injection block on stdout",
     )
     _add_pipe_arguments(p_push)
 
     # -- pull --------------------------------------------------------------
-    p_pull = sub.add_parser("pull", parents=[_common], help="Store LLM output from stdin into memory")
+    p_pull = sub.add_parser("pull", parents=[_common], help="Store text from stdin as memory items (pipe from LLM or echo)")
     p_pull.add_argument("--tags", default=None, help="Comma-separated tags")
     p_pull.add_argument("--title", default=None, help="Title for the stored note")
     p_pull.add_argument("--scope", default="project", help="Item scope (default: project)")
@@ -1506,8 +1582,8 @@ def main() -> None:
     p_search.set_defaults(func=cmd_search)
 
     # -- show --------------------------------------------------------------
-    p_show = sub.add_parser("show", parents=[_common], help="Show memory item details")
-    p_show.add_argument("id", help="Memory item ID")
+    p_show = sub.add_parser("show", parents=[_common], help="Display a memory item by ID (e.g. memctl show MEM-abc123)")
+    p_show.add_argument("id", metavar="MEM-ID", help="Memory item ID (e.g. MEM-abc123)")
     p_show.set_defaults(func=cmd_show)
 
     # -- stats -------------------------------------------------------------
@@ -1517,6 +1593,23 @@ def main() -> None:
     # -- status ------------------------------------------------------------
     p_status = sub.add_parser("status", parents=[_common], help="Project memory health dashboard")
     p_status.set_defaults(func=cmd_status)
+
+    # -- diff --------------------------------------------------------------
+    p_diff = sub.add_parser(
+        "diff", parents=[_common],
+        help="Compare two items or item vs revision",
+    )
+    p_diff.add_argument("id1", help="First memory item ID")
+    p_diff.add_argument("id2", nargs="?", default=None, help="Second memory item ID")
+    p_diff.add_argument(
+        "--revision", type=int, default=0,
+        help="Compare against specific revision number",
+    )
+    p_diff.add_argument(
+        "--latest", action="store_true", default=False,
+        help="Compare current item against its most recent revision",
+    )
+    p_diff.set_defaults(func=cmd_diff)
 
     # -- consolidate -------------------------------------------------------
     p_cons = sub.add_parser("consolidate", parents=[_common], help="Run deterministic consolidation")
@@ -1626,7 +1719,7 @@ def main() -> None:
     # -- inspect -----------------------------------------------------------
     p_inspect = sub.add_parser(
         "inspect", parents=[_common],
-        help="Structural injection block → stdout (auto-mounts/syncs if path given)",
+        help="Structural injection block from a folder path (not a memory ID)",
     )
     p_inspect.add_argument(
         "path", nargs="?", default=None,
