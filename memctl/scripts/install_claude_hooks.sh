@@ -5,7 +5,7 @@
 # hooks into Claude Code settings. Idempotent: safe to re-run.
 #
 # Usage:
-#   ./scripts/install_claude_hooks.sh [--dry-run] [--yes]
+#   bash "$(memctl scripts-path)/install_claude_hooks.sh" [--dry-run] [--yes]
 #
 # Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 
@@ -16,7 +16,7 @@ readonly SETTINGS_FILE="${HOME}/.claude/settings.json"
 
 # Resolve hook paths relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 readonly HOOKS_DIR="${REPO_ROOT}/extras/claude-code/hooks"
 
 # Colors (TTY-aware)

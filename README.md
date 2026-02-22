@@ -11,7 +11,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.12.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Version](https://img.shields.io/badge/version-0.12.2-orange.svg)](https://github.com/ovitrac/memctl/releases)
 [![Tests](https://img.shields.io/badge/tests-966%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-15%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
@@ -581,19 +581,19 @@ The installer checks prerequisites, installs `memctl[mcp]`, configures your clie
 
 ```bash
 # Claude Code (default)
-./scripts/install_mcp.sh
+bash "$(memctl scripts-path)/install_mcp.sh"
 
 # Claude Desktop
-./scripts/install_mcp.sh --client claude-desktop
+bash "$(memctl scripts-path)/install_mcp.sh" --client claude-desktop
 
 # Both clients (non-interactive)
-./scripts/install_mcp.sh --client all --yes
+bash "$(memctl scripts-path)/install_mcp.sh" --client all --yes
 
 # Custom Python / database path
-./scripts/install_mcp.sh --python /usr/bin/python3.12 --db ~/my-project/.memory/memory.db
+bash "$(memctl scripts-path)/install_mcp.sh" --python /usr/bin/python3.12 --db ~/my-project/.memory/memory.db
 
 # Preview without changes
-./scripts/install_mcp.sh --dry-run
+bash "$(memctl scripts-path)/install_mcp.sh" --dry-run
 ```
 
 The installer:
@@ -686,10 +686,10 @@ memctl serve --db memory.db --no-rate-limit
 
 ```bash
 # Install safety guard + audit logger hooks
-./scripts/install_claude_hooks.sh
+bash "$(memctl scripts-path)/install_claude_hooks.sh"
 
 # Uninstall
-./scripts/uninstall_mcp.sh --hooks-only
+bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 ```
 
 ### MCP Tools
@@ -733,7 +733,7 @@ This prevents the "0 results" first-impression problem with untrained users.
 
 ```bash
 pip install "memctl[mcp]"
-./scripts/install_eco.sh --db-root .memory
+bash "$(memctl scripts-path)/install_eco.sh" --db-root .memory
 memctl eco on    # Enable eco mode (required)
 ```
 
@@ -774,7 +774,7 @@ metrics, exit criteria).
 **Uninstall:**
 
 ```bash
-./scripts/uninstall_eco.sh
+bash "$(memctl scripts-path)/uninstall_eco.sh"
 # Removes hook + strategy file. Preserves .memory/memory.db and MCP config.
 ```
 

@@ -8,7 +8,7 @@
 #   - .gitignore entries
 #
 # Usage:
-#   ./scripts/uninstall_eco.sh [--dry-run]
+#   bash "$(memctl scripts-path)/uninstall_eco.sh" [--dry-run]
 #
 # Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 

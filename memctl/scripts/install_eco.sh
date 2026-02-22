@@ -12,7 +12,7 @@
 #   8. Reports extraction capabilities
 #
 # Usage:
-#   ./scripts/install_eco.sh [OPTIONS]
+#   bash "$(memctl scripts-path)/install_eco.sh" [OPTIONS]
 #
 # Options:
 #   --db-root PATH    Where to store memory.db (default: .memory)
@@ -31,7 +31,7 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 readonly SCRIPT_DIR REPO_ROOT
 
 readonly ECO_TEMPLATES="${REPO_ROOT}/extras/eco"

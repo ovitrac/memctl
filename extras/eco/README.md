@@ -87,7 +87,7 @@ Run `demos/eco_demo.sh` for a scripted version of this flow.
 ```bash
 # One-shot setup
 pip install "memctl[mcp]"
-./scripts/install_eco.sh --db-root .memory
+bash "$(memctl scripts-path)/install_eco.sh" --db-root .memory
 ```
 
 This single command:
@@ -111,12 +111,12 @@ Options:
 ## Uninstallation
 
 ```bash
-./scripts/uninstall_eco.sh
+bash "$(memctl scripts-path)/uninstall_eco.sh"
 ```
 
 Removes eco hook, strategy file, and `/eco` slash command. Does **not** remove:
 - `.memory/memory.db` (your knowledge — never deleted)
-- MCP server config (use `./scripts/uninstall_mcp.sh` for that)
+- MCP server config (use `bash "$(memctl scripts-path)/uninstall_mcp.sh"` for that)
 - v0.8 safety hooks (PreToolUse/PostToolUse)
 
 ## Parallel with CloakMCP

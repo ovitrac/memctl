@@ -21,7 +21,7 @@ tokens, and memory that survives between sessions.
 ```bash
 cd /path/to/your-project
 pip install "memctl[mcp]"
-./scripts/install_eco.sh --db-root .memory
+bash "$(memctl scripts-path)/install_eco.sh" --db-root .memory
 ```
 
 This single command:
@@ -437,7 +437,7 @@ scripts/install_claude.sh
 
 # 2. Install eco mode (token-efficient exploration)
 pip install "memctl[mcp]"
-./scripts/install_eco.sh --db-root .memory
+bash "$(memctl scripts-path)/install_eco.sh" --db-root .memory
 memctl eco on
 ```
 
@@ -513,7 +513,7 @@ SQLite with FTS5 is very space-efficient.
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `/eco` command not found | Slash command not installed | Re-run `./scripts/install_eco.sh` |
+| `/eco` command not found | Slash command not installed | Re-run `bash "$(memctl scripts-path)/install_eco.sh"` |
 | eco ON but Claude ignores it | Hook not firing | Check `.claude/hooks/eco-hint.sh` exists and is executable |
 | 0 results from recall | FTS5 AND logic, too many terms | Use 2-3 identifiers, not sentences. See [Query Tips](#5-query-tips) |
 | Stale results after code change | Database not re-synced | `memctl sync` or `memory_sync()` via MCP |

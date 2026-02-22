@@ -5,7 +5,7 @@
 # Claude Code settings. Preserves .memory/ data (never deletes user data).
 #
 # Usage:
-#   ./scripts/uninstall_mcp.sh [OPTIONS]
+#   bash "$(memctl scripts-path)/uninstall_mcp.sh" [OPTIONS]
 #
 # Options:
 #   --client TARGET    claude-code (default), claude-desktop, all

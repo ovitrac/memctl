@@ -209,16 +209,16 @@ memctl works with **any** LLM via Unix pipes. The only difference is integration
 
 ```bash
 # Claude Code (default)
-./scripts/install_mcp.sh
+bash "$(memctl scripts-path)/install_mcp.sh"
 
 # Claude Desktop
-./scripts/install_mcp.sh --client claude-desktop
+bash "$(memctl scripts-path)/install_mcp.sh" --client claude-desktop
 
 # Both clients
-./scripts/install_mcp.sh --client all --yes
+bash "$(memctl scripts-path)/install_mcp.sh" --client all --yes
 
 # Preview without changes
-./scripts/install_mcp.sh --dry-run
+bash "$(memctl scripts-path)/install_mcp.sh" --dry-run
 ```
 
 The installer verifies Python 3.10+, installs `memctl[mcp]`, configures your client, initializes the workspace, and runs `memctl serve --check` to verify.
@@ -310,7 +310,7 @@ eco mode replaces sequential file browsing with deterministic structural retriev
 
 ```bash
 pip install "memctl[mcp]"
-./scripts/install_eco.sh --db-root .memory
+bash "$(memctl scripts-path)/install_eco.sh" --db-root .memory
 memctl eco on    # Required — eco does nothing until enabled
 ```
 
@@ -344,7 +344,7 @@ memctl eco status    # Check current state
 ### Uninstall
 
 ```bash
-./scripts/uninstall_eco.sh
+bash "$(memctl scripts-path)/uninstall_eco.sh"
 # Removes hook + strategy file. Preserves .memory/memory.db and MCP config.
 ```
 

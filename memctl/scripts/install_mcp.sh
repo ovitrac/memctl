@@ -5,7 +5,7 @@
 # Idempotent: safe to re-run. Creates timestamped backups before editing config.
 #
 # Usage:
-#   ./scripts/install_mcp.sh [OPTIONS]
+#   bash "$(memctl scripts-path)/install_mcp.sh" [OPTIONS]
 #
 # Options:
 #   --client TARGET    claude-code (default), claude-desktop, all

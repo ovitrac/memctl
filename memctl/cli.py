@@ -1194,6 +1194,18 @@ def cmd_reindex(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: scripts-path  (print bundled scripts location)
+# ===========================================================================
+
+
+def cmd_scripts_path(args: argparse.Namespace) -> None:
+    """Print the path to bundled installer scripts."""
+    from importlib.resources import files
+    scripts_dir = files("memctl") / "scripts"
+    print(scripts_dir)
+
+
+# ===========================================================================
 # Command: serve  (start MCP server)
 # ===========================================================================
 
@@ -1639,6 +1651,13 @@ def main() -> None:
         help="Show plan without executing",
     )
     p_reindex.set_defaults(func=cmd_reindex)
+
+    # -- scripts-path ------------------------------------------------------
+
+    p_scripts = sub.add_parser(
+        "scripts-path", help="Print path to bundled installer scripts",
+    )
+    p_scripts.set_defaults(func=cmd_scripts_path)
 
     # -- serve -------------------------------------------------------------
     p_serve = sub.add_parser("serve", parents=[_common], help="Start MCP server")
