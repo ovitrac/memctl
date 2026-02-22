@@ -19,7 +19,7 @@ PYTHON = sys.executable
 CLI = [PYTHON, "-m", "memctl.cli"]
 
 
-def run(args, *, env=None, stdin=None, check=False):
+def run(args, *, env=None, stdin=None, check=False, cwd=None):
     """Run a memctl CLI command and return CompletedProcess."""
     merged_env = {**os.environ, **(env or {})}
     return subprocess.run(
@@ -29,6 +29,7 @@ def run(args, *, env=None, stdin=None, check=False):
         env=merged_env,
         input=stdin,
         timeout=30,
+        cwd=cwd,
     )
 
 
@@ -877,3 +878,94 @@ class TestInitConfigJSON:
         assert "store" in data
         assert "inspect" in data
         assert "chat" in data
+
+
+# ---------------------------------------------------------------------------
+# pull — JSON stdin (v0.14)
+# ---------------------------------------------------------------------------
+
+
+class TestPullJsonStdin:
+    """Tests for memctl pull with raw JSON array on stdin."""
+
+    def test_pull_json_array_stores_structured(self, db):
+        """CL1: JSON array on stdin → structured proposals, not flat note."""
+        proposals = json.dumps([{
+            "type": "fact",
+            "title": "Event sourcing decision",
+            "content": "We use event sourcing for state management.",
+            "tags": ["architecture", "events"],
+        }])
+        r = run(["pull", "--db", db, "-q"], stdin=proposals)
+        assert r.returncode == 0
+
+        # Verify it was stored with the correct title (structured, not note)
+        r2 = run(["search", "event sourcing", "--db", db, "--json", "-q"])
+        assert r2.returncode == 0
+        results = json.loads(r2.stdout)
+        assert any(
+            "Event sourcing decision" in item.get("title", "")
+            for item in results
+        ), f"Expected structured title, got: {results}"
+
+    def test_pull_json_with_tags(self, db):
+        """CL2: JSON stdin + --tags merges tags from both sources."""
+        proposals = json.dumps([{
+            "content": "PostgreSQL for persistence.",
+            "tags": ["database"],
+        }])
+        r = run(
+            ["pull", "--db", db, "--tags", "infra,decision", "-q"],
+            stdin=proposals,
+        )
+        assert r.returncode == 0
+
+    def test_pull_json_multiple_items(self, db):
+        """Multiple JSON proposals stored as separate items."""
+        proposals = json.dumps([
+            {"content": "First observation.", "type": "fact", "title": "Obs 1"},
+            {"content": "Second observation.", "type": "note", "title": "Obs 2"},
+        ])
+        r = run(["pull", "--db", db, "-q"], stdin=proposals)
+        assert r.returncode == 0
+
+        # Both should be searchable
+        r2 = run(["search", "observation", "--db", db, "--json", "-q"])
+        assert r2.returncode == 0
+        results = json.loads(r2.stdout)
+        assert len(results) >= 2
+
+
+# ---------------------------------------------------------------------------
+# reindex — eco config update (v0.14)
+# ---------------------------------------------------------------------------
+
+
+class TestReindexEcoConfig:
+    """Tests for tokenizer mismatch fix in cmd_reindex."""
+
+    def test_reindex_updates_eco_config(self, db, tmp_path):
+        """CL6: reindex --tokenizer en updates .claude/eco/config.json."""
+        # Create the eco config file in the expected location (relative to CWD)
+        eco_dir = tmp_path / ".claude" / "eco"
+        eco_dir.mkdir(parents=True)
+        eco_config = eco_dir / "config.json"
+        eco_config.write_text(json.dumps({
+            "db_path": db,
+            "version": "0.14.0",
+        }))
+
+        # Run reindex with cwd=tmp_path so it finds .claude/eco/config.json.
+        # PYTHONPATH ensures memctl is importable even when cwd != project root.
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = run(
+            ["reindex", "--db", db, "--tokenizer", "en", "-q"],
+            cwd=str(tmp_path),
+            env={"PYTHONPATH": project_root},
+        )
+        assert r.returncode == 0
+
+        # Verify eco config was updated
+        updated = json.loads(eco_config.read_text())
+        assert "fts_tokenizer" in updated
+        assert "porter" in updated["fts_tokenizer"]

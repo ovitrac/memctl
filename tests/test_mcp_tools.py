@@ -1,5 +1,5 @@
 """
-Tests for all 14 MCP tools in memctl.mcp.tools.
+Tests for all 17 MCP tools in memctl.mcp.tools.
 
 Tests use direct function calls (not MCP protocol) via a mock FastMCP.
 memory_ask and memory_loop tests are marked with skipif since they
@@ -70,13 +70,13 @@ def call(env, tool_name, **kwargs):
 
 
 class TestToolCount:
-    def test_16_tools_registered(self, mcp_env):
-        assert len(mcp_env["mcp"].tools) == 16
+    def test_17_tools_registered(self, mcp_env):
+        assert len(mcp_env["mcp"].tools) == 17
 
     def test_all_tool_names(self, mcp_env):
         expected = {
             "memory_recall", "memory_search", "memory_propose", "memory_write",
-            "memory_read", "memory_stats", "memory_consolidate",
+            "memory_read", "memory_stats", "memory_status", "memory_consolidate",
             "memory_mount", "memory_sync", "memory_inspect",
             "memory_ask", "memory_export", "memory_import", "memory_loop",
             "memory_reindex", "memory_reset",

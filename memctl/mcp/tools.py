@@ -728,6 +728,67 @@ def register_memory_tools(
             audit.log("memory_stats", rid, session_id, _audit_db,
                       outcome, {}, (time.monotonic() - t0) * 1000)
 
+    @mcp.tool()
+    def memory_status() -> Dict[str, Any]:
+        """Project memory health dashboard: eco state, stats, mounts, last scan.
+
+        Aggregated read-only view combining eco mode state, store statistics,
+        mount points, and last scan timestamp. Use this for a quick overview
+        of the project's memory health.
+
+        Returns:
+            eco_mode, db_path, db_exists, total_items, by_tier, by_type,
+            fts5_available, fts_tokenizer, mounts, last_scan, events_count.
+        """
+        # EXEMPT from rate limiting (health-check must always respond)
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        try:
+            # Eco mode state
+            eco_config_path = Path(".claude/eco/config.json")
+            eco_disabled = Path(".claude/eco/.disabled")
+            eco_state = "disabled" if eco_disabled.exists() else (
+                "active" if eco_config_path.exists() else "not installed"
+            )
+
+            db_exists = Path(db_path).exists()
+
+            if not db_exists:
+                return {
+                    "status": "ok",
+                    "eco_mode": eco_state,
+                    "db_path": db_path,
+                    "db_exists": False,
+                }
+
+            stats = store.stats()
+            mounts = store.list_mounts()
+            last_scan = store.last_event(actions=["memory_inspect", "sync"])
+
+            return {
+                "status": "ok",
+                "eco_mode": eco_state,
+                "db_path": db_path,
+                "db_exists": True,
+                "total_items": stats["total_items"],
+                "by_tier": stats["by_tier"],
+                "by_type": stats["by_type"],
+                "fts5_available": stats["fts5_available"],
+                "fts_tokenizer": stats.get("fts_tokenizer"),
+                "fts_tokenizer_mismatch": stats.get("fts_tokenizer_mismatch", False),
+                "mounts": len(mounts),
+                "last_scan": last_scan,
+                "events_count": stats["events_count"],
+            }
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Status failed: {e}"}
+        finally:
+            audit.log("memory_status", rid, session_id, _audit_db,
+                      outcome, {}, (time.monotonic() - t0) * 1000)
+
     # =====================================================================
     # FOLDER: mount, sync, inspect, ask  (v0.7)
     # =====================================================================

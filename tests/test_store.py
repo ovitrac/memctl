@@ -585,3 +585,51 @@ class TestMigration:
         mounts = s2.list_mounts()
         assert len(mounts) == 1
         s2.close()
+
+
+# ---------------------------------------------------------------------------
+# last_event (v0.14)
+# ---------------------------------------------------------------------------
+
+
+class TestLastEvent:
+    """Tests for store.last_event() public API."""
+
+    def test_last_event_with_filter(self, store):
+        """LE1: last_event returns timestamp filtered by action."""
+        item = MemoryItem(
+            tier="stm", type="note",
+            title="test", content="test content",
+            provenance=MemoryProvenance(),
+        )
+        store.write_item(item, reason="test")
+        # write_item logs action="write"
+        ts = store.last_event(actions=["write"])
+        assert ts is not None
+
+    def test_last_event_no_events(self, store):
+        """LE2: last_event on empty store returns None."""
+        ts = store.last_event()
+        assert ts is None
+
+    def test_last_event_unfiltered(self, store):
+        """last_event without filter returns most recent of any event."""
+        item = MemoryItem(
+            tier="stm", type="note",
+            title="test", content="test content",
+            provenance=MemoryProvenance(),
+        )
+        store.write_item(item, reason="sync")
+        ts = store.last_event()
+        assert ts is not None
+
+    def test_last_event_filter_miss(self, store):
+        """last_event with non-matching filter returns None."""
+        item = MemoryItem(
+            tier="stm", type="note",
+            title="test", content="test content",
+            provenance=MemoryProvenance(),
+        )
+        store.write_item(item, reason="pull")
+        ts = store.last_event(actions=["nonexistent_action"])
+        assert ts is None

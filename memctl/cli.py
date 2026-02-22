@@ -8,6 +8,7 @@ Commands:
     memctl search "query" [-k N] [--tier T]  — FTS5 search → stdout
     memctl show   <id>                       — display single memory item
     memctl stats                             — store metrics
+    memctl status                            — project memory health dashboard
     memctl consolidate [--dry-run]           — merge + promote STM items
     memctl loop   "query" --llm CMD          — bounded recall-answer loop
     memctl mount  <path> [--name N]          — register folder for sync
@@ -329,12 +330,16 @@ def cmd_pull(args: argparse.Namespace) -> None:
     session_id = _env_str("MEMCTL_SESSION", "")
     source_id = f"memctl-pull:{session_id}" if session_id else "memctl-pull"
 
-    # Attempt structured proposal extraction
+    # Attempt structured proposal extraction (3-tier: JSON → delimiters → fallback)
     proposals = []
     try:
         from memctl.proposer import MemoryProposer
         proposer = MemoryProposer()
-        _, proposals = proposer.parse_response_text(text)
+        # Tier 1: raw JSON array (e.g., from /remember CLI fallback)
+        _, proposals = proposer.parse_json_stdin(text)
+        # Tier 2: delimiter-wrapped proposals
+        if not proposals:
+            _, proposals = proposer.parse_response_text(text)
     except Exception as e:
         logger.debug("Proposer parse failed: %s", e)
 
@@ -561,6 +566,87 @@ def cmd_stats(args: argparse.Namespace) -> None:
         print(f"  Audit events: {stats['events_count']}")
 
     store.close()
+
+
+# ===========================================================================
+# Command: status  (project memory health dashboard)
+# ===========================================================================
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    """Show project memory health dashboard."""
+    db_path = _resolve_db(args)
+
+    # 1. Eco mode state
+    eco_config_path = Path(".claude/eco/config.json")
+    eco_disabled = Path(".claude/eco/.disabled")
+    eco_state = "disabled" if eco_disabled.exists() else (
+        "active" if eco_config_path.exists() else "not installed"
+    )
+
+    # 2. DB existence check
+    db_exists = Path(db_path).exists()
+
+    if not db_exists:
+        if getattr(args, "json", False):
+            print(json.dumps({
+                "status": "ok",
+                "eco_mode": eco_state,
+                "db_path": str(db_path),
+                "db_exists": False,
+            }, indent=2))
+        else:
+            print("memctl status")
+            print("=" * 40)
+            print(f"  Eco mode:  {eco_state}")
+            print(f"  Database:  {db_path} (not created yet)")
+            print(f"  Hint:      Run /scan to bootstrap memory")
+        return
+
+    # 3. Full stats from store
+    store = _open_store(db_path)
+    stats = store.stats()
+    mounts = store.list_mounts()
+
+    # 4. Last sync age (public API)
+    last_scan = store.last_event(actions=["memory_inspect", "sync"])
+
+    store.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "status": "ok",
+            "eco_mode": eco_state,
+            "db_path": str(db_path),
+            "db_exists": True,
+            "total_items": stats["total_items"],
+            "by_tier": stats["by_tier"],
+            "by_type": stats["by_type"],
+            "fts5_available": stats["fts5_available"],
+            "fts_tokenizer": stats.get("fts_tokenizer"),
+            "fts_tokenizer_mismatch": stats.get("fts_tokenizer_mismatch", False),
+            "mounts": len(mounts),
+            "last_scan": last_scan,
+            "events_count": stats["events_count"],
+        }, indent=2))
+    else:
+        print("memctl status")
+        print("=" * 40)
+        print(f"  Eco mode:  {eco_state}")
+        print(f"  Database:  {db_path}")
+        print(f"  Items:     {stats['total_items']} active")
+        for tier, count in sorted(stats.get("by_tier", {}).items()):
+            print(f"    {tier.upper():4s}: {count}")
+        print(f"  FTS5:      {'yes' if stats['fts5_available'] else 'no'}"
+              f" ({stats.get('fts_tokenizer', 'n/a')})")
+        if stats.get("fts_tokenizer_mismatch"):
+            _warn("Tokenizer mismatch — run: memctl reindex")
+        print(f"  Mounts:    {len(mounts)}")
+        for m in mounts:
+            print(f"    {m.get('name', '?'):12s} -> {m.get('path', '?')}")
+        if last_scan:
+            print(f"  Last scan: {last_scan}")
+        print(f"  Events:    {stats['events_count']}")
 
 
 # ===========================================================================
@@ -1190,6 +1276,20 @@ def cmd_reindex(args: argparse.Namespace) -> None:
         else:
             _info("  In-place rebuild (same tokenizer).")
 
+    # Update eco config if present, so subsequent commands use the new tokenizer
+    eco_config_path = Path(".claude/eco/config.json")
+    if eco_config_path.exists():
+        try:
+            eco_cfg = json.loads(eco_config_path.read_text(encoding="utf-8"))
+            eco_cfg["fts_tokenizer"] = new_tokenizer
+            eco_config_path.write_text(
+                json.dumps(eco_cfg, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            _info(f"  Updated eco config: fts_tokenizer={new_tokenizer}")
+        except Exception as e:
+            logger.debug("Failed to update eco config: %s", e)
+
     store.close()
 
 
@@ -1413,6 +1513,10 @@ def main() -> None:
     # -- stats -------------------------------------------------------------
     p_stats = sub.add_parser("stats", parents=[_common], help="Store statistics")
     p_stats.set_defaults(func=cmd_stats)
+
+    # -- status ------------------------------------------------------------
+    p_status = sub.add_parser("status", parents=[_common], help="Project memory health dashboard")
+    p_status.set_defaults(func=cmd_status)
 
     # -- consolidate -------------------------------------------------------
     p_cons = sub.add_parser("consolidate", parents=[_common], help="Run deterministic consolidation")

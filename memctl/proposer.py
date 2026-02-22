@@ -2,9 +2,10 @@
 LLM Output Parser for Memory Proposals
 
 Extracts memory.propose tool calls from LLM responses.
-Two strategies:
+Three strategies:
   A) Tool-only side channel (structured tool calls)
   B) Delimiter block parsing (<MEMORY_PROPOSALS_JSON>...</MEMORY_PROPOSALS_JSON>)
+  C) Raw JSON array from stdin (CLI fallback for /remember)
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
@@ -111,6 +112,62 @@ class MemoryProposer:
         cleaned = self._delimiter_re.sub("", text).strip()
 
         return cleaned, proposals
+
+    def parse_json_stdin(
+        self, text: str
+    ) -> Tuple[str, List[MemoryProposal]]:
+        """
+        Parse raw JSON array from stdin (CLI fallback for /remember).
+
+        Supports:
+          - JSON array: [{"content": "...", ...}, ...]
+          - JSON object: {"items": [{"content": "...", ...}, ...]}
+
+        Returns ("", proposals). If text is not valid JSON or contains
+        no proposal-like objects (dicts with a "content" key), returns
+        ("", []).
+        """
+        stripped = text.strip()
+        if not stripped:
+            return "", []
+
+        # Quick guard: must look like JSON structure
+        if not (stripped.startswith("[") or stripped.startswith("{")):
+            return "", []
+
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return "", []
+
+        # Normalize to list
+        if isinstance(data, dict):
+            items = data.get("items", [])
+        elif isinstance(data, list):
+            items = data
+        else:
+            return "", []
+
+        if not items or not isinstance(items, list):
+            return "", []
+
+        # Validate: at least one dict with "content" key
+        has_content = any(
+            isinstance(d, dict) and "content" in d for d in items
+        )
+        if not has_content:
+            return "", []
+
+        proposals = []
+        for item_d in items:
+            if not isinstance(item_d, dict) or "content" not in item_d:
+                continue
+            try:
+                proposals.append(MemoryProposal.from_dict(item_d))
+            except Exception as e:
+                logger.warning("Failed to parse JSON proposal: %s", e)
+
+        return "", proposals
 
     def extract_proposals(
         self,

@@ -362,7 +362,7 @@ else
     ok "Slash command installed: $COMMAND_FILE (/eco on|off|status)"
 
     # Additional commands from templates/eco/commands/
-    for cmd_name in scan.md remember.md recall.md reindex.md forget.md; do
+    for cmd_name in scan.md remember.md recall.md reindex.md forget.md consolidate.md status.md export.md; do
         src_file="${ECO_TEMPLATES}/commands/${cmd_name}"
         dst_file="${COMMANDS_DIR}/${cmd_name}"
         if [[ -f "$src_file" ]]; then

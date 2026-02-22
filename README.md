@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.13.2-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-999%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-16%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.14.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1029%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-17%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -189,6 +189,7 @@ memctl <command> [options]
 | `search QUERY [-k N]` | FTS5 full-text search |
 | `show ID` | Display a single memory item |
 | `stats` | Store statistics |
+| `status` | Project memory health dashboard |
 | `consolidate [--dry-run]` | Deterministic merge of similar STM items |
 | `loop QUERY --llm CMD` | Bounded recall-answer loop with LLM |
 | `mount PATH` | Register a folder as a structured source |
@@ -573,7 +574,7 @@ memctl chat --llm "claude -p" --source docs/ --session --store
 
 ## MCP Server
 
-memctl exposes 14 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
+memctl exposes 17 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
 
 ### Quick Install
 
@@ -712,6 +713,7 @@ bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 | `memory_loop` | Bounded recall-answer loop | v0.7 |
 | `memory_reindex` | Rebuild FTS5 index (tokenizer change) | v0.12 |
 | `memory_reset` | Truncate all memory content (audited) | v0.13 |
+| `memory_status` | Project memory health dashboard | v0.14 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
@@ -726,6 +728,9 @@ eco mode installs optional slash commands for bootstrap and high-frequency opera
 | `/remember <text>` | `memory_propose` | Store observation |
 | `/reindex [preset]` | `memory_reindex` | Rebuild FTS (preview-first) |
 | `/forget all` | `memory_reset` | Reset memory (preview-first) |
+| `/consolidate` | `memory_consolidate` | Merge similar items (preview-first) |
+| `/status` | `memory_status` | Project memory health dashboard |
+| `/export [--tier T]` | `memory_export` | Export memory as JSONL |
 
 Slash commands are **optional UX helpers**. All functionality remains available
 via CLI and MCP tools without any slash command installed.
@@ -817,16 +822,16 @@ memctl/
 ├── ask.py             One-shot folder Q&A orchestrator
 ├── query.py           FTS query normalization and intent classification
 ├── export_import.py   JSONL export/import with policy enforcement
-├── cli.py             16 CLI commands
+├── cli.py             17 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
-├── proposer.py        LLM output parsing (delimiter + regex)
+├── proposer.py        LLM output parsing (delimiter + regex + JSON stdin)
 └── mcp/
-    ├── tools.py       14 MCP tools (memory_* prefix)
+    ├── tools.py       17 MCP tools (memory_* prefix)
     ├── formatting.py  Injection block format (format_version=1)
     └── server.py      FastMCP server entry point
 ```
 
-23 source files. ~8,700 lines. Zero compiled dependencies for core.
+23 source files. ~9,000 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -986,7 +991,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-859 tests across 22 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, and escalation ladder.
+1029 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, and memory reset.
 
 ---
 

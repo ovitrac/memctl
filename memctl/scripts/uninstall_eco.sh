@@ -125,7 +125,7 @@ fi
 # Remove additional slash commands installed by eco
 # ---------------------------------------------------------------------------
 
-for cmd_name in scan.md remember.md recall.md reindex.md forget.md; do
+for cmd_name in scan.md remember.md recall.md reindex.md forget.md consolidate.md status.md export.md; do
     cmd_file="${CLAUDE_DIR}/commands/${cmd_name}"
     if [[ -f "$cmd_file" ]]; then
         if [[ "$DRY_RUN" == "true" ]]; then

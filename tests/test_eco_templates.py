@@ -24,14 +24,18 @@ def _scripts_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# T1: All 5 command files exist
+# T1: All 8 command files exist
 # ---------------------------------------------------------------------------
 
+ALL_COMMANDS = [
+    "scan.md", "remember.md", "recall.md", "reindex.md", "forget.md",
+    "consolidate.md", "status.md", "export.md",
+]
+
 def test_all_command_files_exist():
-    """T1: All 5 command files exist in templates/eco/commands/."""
+    """T1: All 8 command files exist in templates/eco/commands/."""
     commands_dir = _templates_dir() / "commands"
-    expected = ["scan.md", "remember.md", "recall.md", "reindex.md", "forget.md"]
-    for name in expected:
+    for name in ALL_COMMANDS:
         assert (commands_dir / name).is_file(), f"Missing command template: {name}"
 
 
@@ -42,7 +46,7 @@ def test_all_command_files_exist():
 def test_commands_contain_arguments_placeholder():
     """T2: Each command .md contains $ARGUMENTS."""
     commands_dir = _templates_dir() / "commands"
-    for name in ["scan.md", "remember.md", "recall.md", "reindex.md", "forget.md"]:
+    for name in ALL_COMMANDS:
         content = (commands_dir / name).read_text(encoding="utf-8")
         assert "$ARGUMENTS" in content, f"{name} missing $ARGUMENTS placeholder"
 
@@ -134,8 +138,7 @@ def test_installer_references_command_templates():
     """T10: install_eco.sh references commands/*.md."""
     content = (_scripts_dir() / "install_eco.sh").read_text(encoding="utf-8")
     assert "commands/" in content
-    # Should iterate over the 5 command files
-    for name in ["scan.md", "remember.md", "recall.md", "reindex.md", "forget.md"]:
+    for name in ALL_COMMANDS:
         assert name in content, f"install_eco.sh does not reference {name}"
 
 
@@ -155,9 +158,9 @@ def test_installer_writes_config():
 # ---------------------------------------------------------------------------
 
 def test_uninstaller_lists_all_commands():
-    """T12: uninstall_eco.sh references all 5 command file names."""
+    """T12: uninstall_eco.sh references all 8 command file names."""
     content = (_scripts_dir() / "uninstall_eco.sh").read_text(encoding="utf-8")
-    for name in ["scan.md", "remember.md", "recall.md", "reindex.md", "forget.md"]:
+    for name in ALL_COMMANDS:
         assert name in content, f"uninstall_eco.sh does not reference {name}"
 
 
@@ -200,3 +203,73 @@ def test_forget_cli_fallback_uses_reset():
     assert "memctl reset" in content
     # Template should warn that `memctl forget` does not exist
     assert "NOT" in content and "forget" in content
+
+
+# ---------------------------------------------------------------------------
+# T18-T21: /consolidate template (v0.14)
+# ---------------------------------------------------------------------------
+
+def test_consolidate_exists():
+    """T18: consolidate.md exists in templates/eco/commands/."""
+    assert (_templates_dir() / "commands" / "consolidate.md").is_file()
+
+
+def test_consolidate_references_memory_consolidate():
+    """T19: consolidate.md references memory_consolidate."""
+    content = (_templates_dir() / "commands" / "consolidate.md").read_text(encoding="utf-8")
+    assert "memory_consolidate" in content
+
+
+def test_consolidate_cli_fallback():
+    """T20: consolidate.md CLI fallback uses 'memctl consolidate'."""
+    content = (_templates_dir() / "commands" / "consolidate.md").read_text(encoding="utf-8")
+    assert "memctl consolidate" in content
+
+
+def test_consolidate_safety_pattern():
+    """T21: consolidate.md has --dry-run + --confirm safety pattern."""
+    content = (_templates_dir() / "commands" / "consolidate.md").read_text(encoding="utf-8")
+    assert "--dry-run" in content
+    assert "--confirm" in content
+
+
+# ---------------------------------------------------------------------------
+# T22-T24: /status template (v0.14)
+# ---------------------------------------------------------------------------
+
+def test_status_exists():
+    """T22: status.md exists in templates/eco/commands/."""
+    assert (_templates_dir() / "commands" / "status.md").is_file()
+
+
+def test_status_references_memory_status():
+    """T23: status.md references memory_status."""
+    content = (_templates_dir() / "commands" / "status.md").read_text(encoding="utf-8")
+    assert "memory_status" in content
+
+
+def test_status_cli_fallback():
+    """T24: status.md CLI fallback uses 'memctl status'."""
+    content = (_templates_dir() / "commands" / "status.md").read_text(encoding="utf-8")
+    assert "memctl status" in content
+
+
+# ---------------------------------------------------------------------------
+# T25-T27: /export template (v0.14)
+# ---------------------------------------------------------------------------
+
+def test_export_exists():
+    """T25: export.md exists in templates/eco/commands/."""
+    assert (_templates_dir() / "commands" / "export.md").is_file()
+
+
+def test_export_references_memory_export():
+    """T26: export.md references memory_export."""
+    content = (_templates_dir() / "commands" / "export.md").read_text(encoding="utf-8")
+    assert "memory_export" in content
+
+
+def test_export_cli_fallback():
+    """T27: export.md CLI fallback uses 'memctl export'."""
+    content = (_templates_dir() / "commands" / "export.md").read_text(encoding="utf-8")
+    assert "memctl export" in content

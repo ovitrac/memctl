@@ -1,6 +1,6 @@
 # eco Mode Quickstart — Claude Code Edition
 
-**Version**: 0.13.2 | **Time to first eco session: ~5 minutes**
+**Version**: 0.14.0 | **Time to first eco session: ~5 minutes**
 
 eco mode replaces Claude's sequential file browsing with deterministic structural
 retrieval and persistent cross-file reasoning. Same questions, better answers, fewer
@@ -88,7 +88,7 @@ Start Claude Code in your project:
 claude
 ```
 
-With eco mode enabled, Claude now has 16 `memory_*` MCP tools. Here is what a
+With eco mode enabled, Claude now has 17 `memory_*` MCP tools. Here is what a
 typical first interaction looks like.
 
 ### Step 1: Explore the project structure
@@ -156,7 +156,7 @@ Claude remembers what it learned. No re-exploration.
 ## 3. How eco Changes Claude's Behavior
 
 eco mode injects a ~30-token hint every turn via the `UserPromptSubmit` hook. This
-tells Claude that 16 `memory_*` MCP tools are available and preferred for exploration.
+tells Claude that 17 `memory_*` MCP tools are available and preferred for exploration.
 
 Claude still has full access to native `Read`, `Edit`, `Write`, and all other tools.
 eco is **advisory for retrieval, not restrictive for editing**.
@@ -541,9 +541,9 @@ SQLite with FTS5 is very space-efficient.
 | Evaluate eco with your team | [extras/eco/PILOT.md](extras/eco/PILOT.md) |
 | Learn the general memctl CLI | [QUICKSTART.md](QUICKSTART.md) |
 | Set up defense-in-depth hooks | [README.md — Defense in Depth](README.md#defense-in-depth-v08) |
-| See all 16 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
+| See all 17 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
 | Explore the Python API | [README.md — Python API](README.md#python-api) |
 
 ---
 
-*memctl v0.13.2 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.14.0 — Olivier Vitrac, Adservio Innovation Lab*

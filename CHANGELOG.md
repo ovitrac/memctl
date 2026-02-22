@@ -4,6 +4,54 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0] — 2026-02-22
+
+### Added
+- **`memctl pull` JSON parsing (P1)**: 3-tier parse chain — raw JSON arrays on
+  stdin are now parsed as structured proposals (type, tags, title preserved).
+  Fixes the last determinism gap: LLM proposes structured facts, the kernel
+  enforces schema instead of flattening to opaque notes. Supports both
+  `[{"content":...}]` and `{"items":[...]}` formats via `parse_json_stdin()`.
+- **`store.last_event(actions)`**: public API for querying the most recent event
+  by action type. Used by `cmd_status` and `memory_status` — no private `_conn`
+  access needed.
+- **`memctl status` CLI command**: project memory health dashboard showing eco
+  state, store stats, mounts, and last scan timestamp. Supports `--json`.
+  Handles missing DB gracefully (suggests `/scan`).
+- **`memory_status` MCP tool (#17)**: read-only project health dashboard via MCP.
+  Exempt from rate limiting (like `memory_stats`). Returns eco state, store stats,
+  mounts, and last scan.
+- **Slash commands** (3 new, 8 total):
+  - `/consolidate [--dry-run]` — Merge similar memory items (`memory_consolidate`)
+  - `/status` — Project memory health dashboard (`memory_status`)
+  - `/export [--tier T]` — Export memory as JSONL (`memory_export`)
+- **Tokenizer eco config sync (P2)**: `memctl reindex` now updates
+  `.claude/eco/config.json` with the new tokenizer, eliminating the mismatch
+  warning on subsequent commands.
+
+### Fixed
+- **`memctl pull` JSON flattening**: raw JSON arrays on stdin (e.g., from
+  `/remember` CLI fallback) were stored as opaque notes instead of structured
+  proposals. Now correctly maps `type`, `tags`, `title`, and `content` fields.
+
+### Tests
+- `tests/test_proposer.py` — 12 tests (PJ1-PJ6 + edge cases): JSON stdin parsing
+  (happy path, items wrapper, empty, no content, plain text, mixed, whitespace).
+- `tests/test_store.py` — 4 tests (LE1-LE4): `last_event()` with action filter,
+  no events, unfiltered, filter miss.
+- `tests/test_cli.py` — 4 tests: pull JSON stdin (structured, tags, multiple items),
+  reindex eco config sync.
+- `tests/test_eco_templates.py` — 10 new tests (T18-T27): consolidate/status/export
+  template existence, MCP references, CLI fallbacks, safety patterns.
+- `tests/test_mcp_tools.py` — updated: 16→17 tools, `memory_status` in expected set.
+- **Total: 1029 passed, 6 skipped.**
+
+### Architecture
+- MCP tool count: 16 → 17 (`memory_status` added; `memory_export` already existed).
+- Slash command count: 5 → 8 (`/consolidate`, `/status`, `/export`).
+- Slash command governance rule unchanged: commands restricted to bootstrap +
+  high-frequency. All operations remain available via CLI and MCP tools.
+
 ## [0.13.2] — 2026-02-22
 
 ### Added

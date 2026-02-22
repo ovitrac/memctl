@@ -7,7 +7,7 @@ Policy-governed, content-addressed, and forward-compatible with RAGIX.
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
 
-__version__ = "0.13.2"
+__version__ = "0.14.0"
 
 from memctl.types import (
     MemoryItem,

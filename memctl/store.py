@@ -1261,6 +1261,34 @@ class MemoryStore:
                 "fts_tokenizer_mismatch": mismatch,
             }
 
+    def last_event(
+        self,
+        actions: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        """Return ISO timestamp of the most recent event, optionally filtered.
+
+        Args:
+            actions: If provided, filter to events matching these action names.
+
+        Returns:
+            ISO-8601 timestamp string, or None if no matching events.
+        """
+        with self._lock:
+            if actions:
+                placeholders = ",".join("?" for _ in actions)
+                row = self._conn.execute(
+                    f"SELECT timestamp FROM memory_events "
+                    f"WHERE action IN ({placeholders}) "
+                    f"ORDER BY timestamp DESC LIMIT 1",
+                    actions,
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT timestamp FROM memory_events "
+                    "ORDER BY timestamp DESC LIMIT 1"
+                ).fetchone()
+            return row["timestamp"] if row else None
+
     # -- Reset (v0.13) -----------------------------------------------------
 
     def reset(self, preserve_mounts: bool = True, dry_run: bool = False) -> dict:
