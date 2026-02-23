@@ -4,6 +4,15 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.2] — 2026-02-23
+
+### Added
+- **`memctl --version` flag**: prints `memctl X.Y.Z` and exits.
+- **`memctl serve --transport`**: support for `streamable-http` and `sse` transports
+  in addition to the default `stdio`. Enables remote/multi-machine MCP access.
+  New flags: `--transport` (`stdio`/`streamable-http`/`sse`), `--host`, `--port`.
+  Warns on `--host 0.0.0.0` (LAN exposure).
+
 ## [0.15.1] — 2026-02-22
 
 ### Fixed

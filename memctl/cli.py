@@ -1469,9 +1469,19 @@ def cmd_serve(args: argparse.Namespace) -> None:
         _warn("MCP dependencies not installed. Run: pip install memctl[mcp]")
         sys.exit(1)
 
+    transport = getattr(args, "transport", "stdio")
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8765)
+
     _info(f"memctl MCP server (db={server_args.db})")
-    _info("Press Ctrl+C to stop.")
-    mcp.run()
+    if transport == "stdio":
+        _info("Transport: stdio (local). Press Ctrl+C to stop.")
+        mcp.run()
+    else:
+        if host == "0.0.0.0":
+            _warn("Binding to 0.0.0.0 exposes the server on all interfaces.")
+        _info(f"Transport: {transport} on {host}:{port}. Press Ctrl+C to stop.")
+        mcp.run(transport=transport, host=host, port=port)
 
 
 # ===========================================================================
@@ -1542,6 +1552,10 @@ def main() -> None:
         prog="memctl",
         description="memctl — persistent structured memory for LLM orchestration",
         parents=[_common],
+    )
+    from memctl import __version__
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}",
     )
 
     sub = parser.add_subparsers(dest="command", help="Available commands")
@@ -1942,6 +1956,19 @@ def main() -> None:
     p_serve.add_argument(
         "--audit-log", default=None,
         help="Audit log file path (default: stderr)",
+    )
+    p_serve.add_argument(
+        "--transport", default="stdio",
+        choices=["stdio", "streamable-http", "sse"],
+        help="MCP transport: stdio (default), streamable-http, or sse",
+    )
+    p_serve.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address for HTTP/SSE transport (default: 127.0.0.1)",
+    )
+    p_serve.add_argument(
+        "--port", type=int, default=8765,
+        help="Port for HTTP/SSE transport (default: 8765)",
     )
     p_serve.set_defaults(func=cmd_serve)
 
