@@ -4,6 +4,19 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.1] — 2026-02-23
+
+### Added
+- **`pypdf` as core dependency**: PDF text extraction now works out of the box
+  without system packages. Pure Python via `pypdf>=4.0.0`.
+- **PDF fallback chain**: `_extract_pdf()` tries `pypdf` first, falls back to
+  `pdftotext` (poppler-utils) if pypdf returns empty or fails.
+
+### Changed
+- `dependencies` in `pyproject.toml`: `[]` → `["pypdf>=4.0.0"]`.
+- `pypdf` removed from `[docs]` optional extra (now core).
+- README installation section updated: PDF no longer requires poppler-utils.
+
 ## [0.16.0] — 2026-02-23
 
 ### Added

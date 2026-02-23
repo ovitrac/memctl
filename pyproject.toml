@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memctl"
-version = "0.16.0"
+version = "0.16.1"
 description = "A Unix-native memory control plane for LLM orchestration"
 authors = [
     {name = "Olivier Vitrac", email = "olivier.vitrac@adservio.fr"}
@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = []  # Zero runtime dependencies — stdlib only
+dependencies = ["pypdf>=4.0.0"]
 
 [project.optional-dependencies]
 docs = [

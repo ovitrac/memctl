@@ -11,7 +11,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.16.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Version](https://img.shields.io/badge/version-0.16.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
 [![Tests](https://img.shields.io/badge/tests-1073%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-19%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
@@ -29,7 +29,7 @@
 
 LLMs forget everything between turns. memctl gives them persistent, structured, policy-governed memory backed by a single SQLite file.
 
-- **Zero dependencies** — stdlib only. No numpy, no torch, no compiled extensions.
+- **Minimal dependencies** — only `pypdf` for PDF support. No numpy, no torch, no compiled extensions.
 - **One file** — Everything in `memory.db` (SQLite + FTS5 + WAL).
 - **Unix composable** — `push` writes to stdout, `pull` reads from stdin. Pipe freely.
 - **Policy-governed** — 35 detection patterns block secrets, injection, instructional content, and PII before storage.
@@ -62,8 +62,8 @@ For everything:
 pip install memctl[all]
 ```
 
-**Requirements:** Python 3.10+ (3.12 recommended). No compiled dependencies for core.
-PDF extraction requires `pdftotext` from poppler-utils (`sudo apt install poppler-utils` or `brew install poppler`).
+**Requirements:** Python 3.10+ (3.12 recommended). No compiled dependencies.
+PDF extraction uses `pypdf` (installed automatically). Falls back to `pdftotext` (poppler-utils) if needed.
 
 ---
 

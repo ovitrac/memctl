@@ -270,15 +270,33 @@ def _extract_ods(path: str) -> str:
     return "\n\n".join(parts)
 
 
-# --- PDF (pdftotext via poppler) -------------------------------------------
+# --- PDF (pypdf preferred, pdftotext fallback) ----------------------------
 
 def _extract_pdf(path: str) -> str:
-    """Extract text from a PDF using pdftotext (poppler-utils).
+    """Extract text from a PDF.
 
-    Requires the ``pdftotext`` binary from the ``poppler-utils`` system
-    package (``sudo apt install poppler-utils`` on Debian/Ubuntu,
-    ``brew install poppler`` on macOS).
+    Tries ``pypdf`` (pure Python, from ``[docs]`` extra) first.
+    Falls back to ``pdftotext`` (poppler-utils system binary) if pypdf
+    is not installed.
     """
+    # --- Strategy 1: pypdf (pure Python) ----------------------------------
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(path)
+        pages = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                pages.append(text)
+        if pages:
+            return "\n\n".join(pages)
+        logger.debug("pypdf returned empty text for %s, trying pdftotext", path)
+    except ImportError:
+        pass
+    except Exception as exc:
+        logger.debug("pypdf failed for %s: %s, trying pdftotext", path, exc)
+
+    # --- Strategy 2: pdftotext (poppler-utils) ----------------------------
     try:
         result = subprocess.run(
             ["pdftotext", "-layout", path, "-"],
@@ -288,9 +306,9 @@ def _extract_pdf(path: str) -> str:
         )
     except FileNotFoundError:
         raise ImportError(
-            "pdftotext (poppler-utils) is required for .pdf files. "
-            "Install with: sudo apt install poppler-utils   "
-            "(or: brew install poppler on macOS)"
+            "PDF extraction requires either pypdf (pip install pypdf) "
+            "or pdftotext (sudo apt install poppler-utils / "
+            "brew install poppler on macOS)"
         )
     except subprocess.TimeoutExpired:
         logger.warning("PDF extraction timed out for %s", path)
