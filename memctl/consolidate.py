@@ -23,6 +23,7 @@ Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set
 
@@ -49,15 +50,30 @@ def _jaccard(a: Set[str], b: Set[str]) -> float:
     return len(a & b) / len(union)
 
 
+def _source_affinity(a: MemoryItem, b: MemoryItem) -> bool:
+    """True if both items come from the same source directory.
+
+    Hard gate: items from different parent directories never cluster,
+    regardless of tag overlap. Items with no provenance (stdin, manual)
+    are allowed to cluster with anything.
+    """
+    src_a = a.provenance.source_id if a.provenance else ""
+    src_b = b.provenance.source_id if b.provenance else ""
+    if not src_a or not src_b:
+        return True  # No provenance -> allow clustering (stdin items)
+    return os.path.dirname(src_a) == os.path.dirname(src_b)
+
+
 def _coarse_cluster(
     items: List[MemoryItem],
     distance_threshold: float = 0.3,
 ) -> List[List[MemoryItem]]:
     """
-    Cluster items by type + tag overlap (Jaccard).
+    Cluster items by type + tag overlap (Jaccard) + source affinity.
 
     Two items are in the same cluster if they share the same type AND
-    their Jaccard tag similarity >= (1 - distance_threshold).
+    their Jaccard tag similarity >= (1 - distance_threshold) AND
+    they come from the same source directory (hard gate).
     """
     similarity_threshold = 1.0 - distance_threshold
 
@@ -82,7 +98,8 @@ def _coarse_cluster(
                 if item_b.id in assigned:
                     continue
                 tags_b = set(t.lower() for t in item_b.tags)
-                if _jaccard(tags_a, tags_b) >= similarity_threshold:
+                if (_jaccard(tags_a, tags_b) >= similarity_threshold
+                        and _source_affinity(item_a, item_b)):
                     cluster.append(item_b)
                     assigned.add(item_b.id)
             if len(cluster) >= 2:
@@ -170,9 +187,17 @@ class ConsolidationPipeline:
         self._store = store
         self._config = config or ConsolidateConfig()
 
+    def _distinct_scopes(self) -> List[str]:
+        """Return distinct scope values from non-archived STM items."""
+        rows = self._store._conn.execute(
+            "SELECT DISTINCT scope FROM memory_items "
+            "WHERE tier='stm' AND archived=0"
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
     def run(
         self,
-        scope: str = "project",
+        scope: Optional[str] = "project",
         dry_run: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -180,19 +205,41 @@ class ConsolidationPipeline:
 
         Steps:
           1. Collect non-archived STM items
-          2. Cluster by type + tags (Jaccard)
+          2. Cluster by type + tags (Jaccard) + source affinity (hard gate)
           3. Merge each cluster deterministically
           4. Write merged items + supersedes links
           5. Archive originals
           6. Promote high-usage items to LTM
 
         Args:
-            scope: Memory scope to consolidate.
+            scope: Memory scope to consolidate. None = all scopes
+                   (each scope consolidated independently).
             dry_run: If True, compute clusters but don't write.
 
         Returns:
             Summary dict with counts and merge chains.
         """
+        # Multi-scope: consolidate each scope independently
+        if scope is None:
+            scopes = self._distinct_scopes()
+            combined: Dict[str, Any] = {
+                "items_processed": 0,
+                "clusters_found": 0,
+                "items_merged": 0,
+                "items_promoted": 0,
+                "merge_chains": [],
+                "scopes_processed": [],
+            }
+            for s in scopes:
+                result = self.run(scope=s, dry_run=dry_run)
+                combined["items_processed"] += result["items_processed"]
+                combined["clusters_found"] += result["clusters_found"]
+                combined["items_merged"] += result["items_merged"]
+                combined["items_promoted"] += result["items_promoted"]
+                combined["merge_chains"].extend(result["merge_chains"])
+                combined["scopes_processed"].append(s)
+            return combined
+
         stats: Dict[str, Any] = {
             "items_processed": 0,
             "clusters_found": 0,

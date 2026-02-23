@@ -28,6 +28,17 @@ from typing import Any, Dict, List, Optional
 
 from memctl.extract import ALL_INGESTABLE_EXTS
 
+
+def derive_scope(root_path: str, explicit_scope: Optional[str] = None) -> str:
+    """Derive scope from root path, unless explicitly overridden.
+
+    When syncing a mount, scope is the basename of the root path.
+    An explicit scope (from CLI --scope) always takes precedence.
+    """
+    if explicit_scope:
+        return explicit_scope
+    return os.path.basename(os.path.abspath(root_path))
+
 logger = logging.getLogger(__name__)
 
 
@@ -178,6 +189,7 @@ def sync_mount(
     lang_hint: Optional[str] = None,
     max_tokens: int = 1800,
     quiet: bool = False,
+    scope: Optional[str] = None,
 ) -> SyncResult:
     """Sync a folder into the memory store.
 
@@ -198,6 +210,8 @@ def sync_mount(
         lang_hint: Language hint for new mount registration.
         max_tokens: Max tokens per chunk for ingestion.
         quiet: Suppress stderr progress.
+        scope: Explicit scope override. If None, derived from mount name
+               or path basename via derive_scope().
 
     Returns:
         SyncResult with counts.
@@ -228,6 +242,12 @@ def sync_mount(
         # Use mount's ignore patterns if none provided
         patterns = ignore_patterns if ignore_patterns is not None else mount["ignore_patterns"]
         mount_lang = lang_hint or mount.get("lang_hint")
+
+        # Derive scope: explicit > mount name > path basename
+        mount_scope = derive_scope(
+            canonical,
+            explicit_scope=scope or (mount["name"] if mount.get("name") else None),
+        )
 
         # Scan (no hashing — just stat)
         scan = scan_mount(canonical, patterns)
@@ -288,7 +308,7 @@ def sync_mount(
             # Ingest through existing pipeline
             ingest_result = ingest_file(
                 store, fi.abs_path,
-                scope="project",
+                scope=mount_scope,
                 max_tokens=max_tokens,
                 tags=[],
                 format_mode="auto",

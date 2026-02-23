@@ -790,8 +790,10 @@ def cmd_consolidate(args: argparse.Namespace) -> None:
     config = MemoryConfig()
     pipeline = ConsolidationPipeline(store, config.consolidate)
 
+    scope = None if getattr(args, "all_scopes", False) else args.scope
+
     try:
-        result = pipeline.run(scope=args.scope, dry_run=args.dry_run)
+        result = pipeline.run(scope=scope, dry_run=args.dry_run)
     except Exception as e:
         _warn(f"Consolidation failed: {e}")
         store.close()
@@ -986,6 +988,8 @@ def cmd_sync(args: argparse.Namespace) -> None:
     full = getattr(args, "full", False)
     quiet = getattr(args, "quiet", False)
 
+    scope = getattr(args, "scope", None)
+
     if getattr(args, "path", None):
         # Sync specific path
         try:
@@ -993,6 +997,7 @@ def cmd_sync(args: argparse.Namespace) -> None:
                 db_path, args.path,
                 delta=not full,
                 quiet=quiet,
+                scope=scope,
             )
         except (FileNotFoundError, NotADirectoryError) as e:
             _warn(f"Error: {e}")
@@ -1687,6 +1692,7 @@ def main() -> None:
     # -- consolidate -------------------------------------------------------
     p_cons = sub.add_parser("consolidate", parents=[_common], help="Run deterministic consolidation")
     p_cons.add_argument("--scope", default="project", help="Scope filter (default: project)")
+    p_cons.add_argument("--all-scopes", action="store_true", help="Consolidate all scopes independently")
     p_cons.add_argument("--dry-run", action="store_true", help="Compute clusters but don't write")
     p_cons.set_defaults(func=cmd_consolidate)
 
@@ -1786,6 +1792,10 @@ def main() -> None:
     p_sync.add_argument(
         "--full", action="store_true",
         help="Re-process all files (ignore delta cache)",
+    )
+    p_sync.add_argument(
+        "--scope", default=None,
+        help="Override scope (default: derived from folder name)",
     )
     p_sync.set_defaults(func=cmd_sync)
 

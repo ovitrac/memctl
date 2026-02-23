@@ -8,7 +8,10 @@ import os
 import time
 import pytest
 
-from memctl.sync import scan_mount, sync_mount, sync_all, FileInfo, ScanResult, SyncResult
+from memctl.sync import (
+    scan_mount, sync_mount, sync_all, derive_scope,
+    FileInfo, ScanResult, SyncResult,
+)
 from memctl.mount import register_mount, list_mounts
 from memctl.store import MemoryStore
 
@@ -293,5 +296,123 @@ class TestSyncIdempotency:
                     f"Missing size_bytes for {f['file_path']}"
                 assert f["ext"] is not None, \
                     f"Missing ext for {f['file_path']}"
+        finally:
+            store.close()
+
+
+# ── P0: Auto-scope from mount path (v0.16.1) ────────────────────────
+
+class TestDeriveScope:
+    """P0: derive_scope() unit tests."""
+
+    def test_explicit_scope_wins(self):
+        """P0-T3a: explicit scope always overrides."""
+        assert derive_scope("/tmp/GRDF", explicit_scope="custom") == "custom"
+
+    def test_basename_derived(self):
+        """P0-T2: scope derived from path basename."""
+        assert derive_scope("/home/user/GRDF") == "GRDF"
+
+    def test_relative_path(self):
+        """derive_scope on relative path uses abspath basename."""
+        result = derive_scope("some_folder")
+        assert result == "some_folder"
+
+    def test_none_explicit_uses_path(self):
+        """None explicit_scope falls through to path."""
+        assert derive_scope("/tmp/myproject", explicit_scope=None) == "myproject"
+
+
+class TestSyncScope:
+    """P0: sync_mount auto-scope integration tests."""
+
+    def test_p0_t1_named_mount_scope(self, db_path, tmp_path):
+        """P0-T1: sync with named mount -> items have scope = mount name."""
+        folder = tmp_path / "myproject"
+        folder.mkdir()
+        (folder / "readme.md").write_text("# Hello\n\nContent here.")
+
+        # Register mount with explicit name
+        register_mount(db_path, str(folder), name="MyProject")
+
+        sync_mount(db_path, str(folder), quiet=True)
+
+        store = MemoryStore(db_path=db_path)
+        try:
+            items = store.list_items(scope="MyProject", limit=100)
+            assert len(items) > 0, "Expected items with scope=MyProject"
+            for item in items:
+                assert item.scope == "MyProject"
+        finally:
+            store.close()
+
+    def test_p0_t2_basename_scope(self, db_path, tmp_path):
+        """P0-T2: sync with unnamed mount -> scope = path basename."""
+        folder = tmp_path / "GRDF"
+        folder.mkdir()
+        (folder / "notes.txt").write_text("Some notes about the project.")
+
+        sync_mount(db_path, str(folder), quiet=True)
+
+        store = MemoryStore(db_path=db_path)
+        try:
+            items = store.list_items(scope="GRDF", limit=100)
+            assert len(items) > 0, "Expected items with scope=GRDF"
+            for item in items:
+                assert item.scope == "GRDF"
+        finally:
+            store.close()
+
+    def test_p0_t3_explicit_scope_override(self, db_path, tmp_path):
+        """P0-T3: explicit --scope overrides auto-derivation."""
+        folder = tmp_path / "somefolder"
+        folder.mkdir()
+        (folder / "doc.md").write_text("# Doc\n\nContent.")
+
+        sync_mount(db_path, str(folder), quiet=True, scope="override_scope")
+
+        store = MemoryStore(db_path=db_path)
+        try:
+            items = store.list_items(scope="override_scope", limit=100)
+            assert len(items) > 0, "Expected items with scope=override_scope"
+            for item in items:
+                assert item.scope == "override_scope"
+        finally:
+            store.close()
+
+    def test_p0_t4_legacy_items_findable(self, db_path, corpus):
+        """P0-T4: legacy scope=project items remain findable."""
+        sync_mount(db_path, corpus, quiet=True, scope="project")
+
+        store = MemoryStore(db_path=db_path)
+        try:
+            items = store.list_items(scope="project", limit=100)
+            assert len(items) > 0, "Legacy scope=project items must be findable"
+        finally:
+            store.close()
+
+    def test_p0_t5_two_mounts_different_scopes(self, db_path, tmp_path):
+        """Two mounts produce two different scopes -- no contamination."""
+        proj_a = tmp_path / "ProjectA"
+        proj_a.mkdir()
+        (proj_a / "a.md").write_text("# Project A\n\nContent A.")
+
+        proj_b = tmp_path / "ProjectB"
+        proj_b.mkdir()
+        (proj_b / "b.md").write_text("# Project B\n\nContent B.")
+
+        sync_mount(db_path, str(proj_a), quiet=True)
+        sync_mount(db_path, str(proj_b), quiet=True)
+
+        store = MemoryStore(db_path=db_path)
+        try:
+            items_a = store.list_items(scope="ProjectA", limit=100)
+            items_b = store.list_items(scope="ProjectB", limit=100)
+            assert len(items_a) > 0
+            assert len(items_b) > 0
+            # No cross-contamination
+            ids_a = {i.id for i in items_a}
+            ids_b = {i.id for i in items_b}
+            assert ids_a.isdisjoint(ids_b), "Scopes must be disjoint"
         finally:
             store.close()

@@ -660,15 +660,19 @@ def register_memory_tools(
     def memory_consolidate(
         scope: str = "project",
         dry_run: bool = False,
+        all_scopes: bool = False,
     ) -> Dict[str, Any]:
         """Trigger memory consolidation: deduplication, merge, and tier promotion.
 
-        Deterministic consolidation: clusters STM items by type+tags (Jaccard),
-        merges each cluster (longest content wins), promotes high-usage to LTM.
+        Deterministic consolidation: clusters STM items by type+tags (Jaccard)
+        + source affinity, merges each cluster (longest content wins),
+        promotes high-usage to LTM.
 
         Args:
             scope: Scope to consolidate (default "project").
             dry_run: If True, compute clusters but don't write (default False).
+            all_scopes: If True, consolidate all scopes independently
+                        (ignores scope parameter).
 
         Returns:
             Consolidation results (clusters merged, items promoted, etc.).
@@ -683,7 +687,8 @@ def register_memory_tools(
                 rate_limiter.check_write(session_id)
 
             pipeline = ConsolidationPipeline(store, config.consolidate)
-            stats = pipeline.run(scope=scope, dry_run=dry_run)
+            effective_scope = None if all_scopes else scope
+            stats = pipeline.run(scope=effective_scope, dry_run=dry_run)
             detail = {
                 "merged": stats.get("items_merged", 0),
                 "archived": stats.get("items_archived", 0),
@@ -1029,6 +1034,7 @@ def register_memory_tools(
     def memory_sync(
         path: Optional[str] = None,
         full: bool = False,
+        scope: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Sync mounted folders into the memory store.
 
@@ -1039,6 +1045,8 @@ def register_memory_tools(
             path: Folder path to sync (auto-registers if not mounted).
                   None = sync all registered mounts.
             full: If True, re-process all files ignoring delta cache.
+            scope: Override scope for synced items. If None, scope is
+                   derived from the folder name automatically.
 
         Returns:
             Sync statistics (files scanned, new, changed, chunks created).
@@ -1059,6 +1067,7 @@ def register_memory_tools(
                     db_path, path,
                     delta=not full,
                     quiet=True,
+                    scope=scope,
                 )
                 detail = {
                     "synced": 1,

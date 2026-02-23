@@ -4,6 +4,28 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.2] — 2026-02-23
+
+### Fixed (Structural Integrity — first production feedback)
+- **P0: Auto-scope from mount path.** `sync.py` no longer hardcodes
+  `scope="project"` for all synced files. Scope is now derived from the
+  mount name or path basename via `derive_scope()`. Explicit `--scope`
+  flag overrides. Legacy `scope=project` items remain untouched.
+  New `--scope` flag on `memctl sync`.
+- **P1: Source-path affinity gate in clustering.** `_coarse_cluster()` now
+  checks `_source_affinity()` — items from different parent directories
+  never cluster, regardless of tag overlap. Prevents knowledge collapse
+  from generic tags (e.g. `java`, `domaine`).
+- **P1: Multi-scope consolidation.** `memctl consolidate --all-scopes`
+  consolidates each scope independently. `memory_consolidate(all_scopes=True)`
+  MCP equivalent.
+
+### Tests
+- P0-T1–T5: `derive_scope()` unit tests + `sync_mount` auto-scope integration.
+- P1-T1–T6: `_source_affinity()` unit tests.
+- 6 clustering + multi-scope integration tests.
+- Total: 1093 passed, 7 skipped.
+
 ## [0.16.1] — 2026-02-23
 
 ### Added
