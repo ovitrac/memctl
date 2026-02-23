@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.15.2-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-1065%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-18%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.16.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1073%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-19%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -190,6 +190,7 @@ memctl <command> [options]
 | `show ID` | Display a single memory item |
 | `stats` | Store statistics |
 | `status` | Project memory health dashboard |
+| `eco [on\|off\|status]` | Toggle eco mode (on/off/status) |
 | `consolidate [--dry-run]` | Deterministic merge of similar STM items |
 | `loop QUERY --llm CMD` | Bounded recall-answer loop with LLM |
 | `mount PATH` | Register a folder as a structured source |
@@ -575,7 +576,7 @@ memctl chat --llm "claude -p" --source docs/ --session --store
 
 ## MCP Server
 
-memctl exposes 17 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
+memctl exposes 19 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
 
 ### Quick Install
 
@@ -716,6 +717,7 @@ bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 | `memory_reset` | Truncate all memory content (audited) | v0.13 |
 | `memory_status` | Project memory health dashboard | v0.14 |
 | `memory_diff` | Compare two items or item vs revision | v0.15 |
+| `memory_eco` | Toggle eco mode (on/off/status) | v0.16 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 

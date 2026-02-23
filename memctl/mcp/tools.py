@@ -1,5 +1,5 @@
 """
-memctl MCP Tools — 18 memory tools for MCP integration.
+memctl MCP Tools — 19 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
 Each tool follows the locked middleware order:
@@ -20,6 +20,7 @@ Tool hierarchy:
     FOLDER:     memory_mount, memory_sync, memory_inspect, memory_ask
     DATA:       memory_export, memory_import
     LOOP:       memory_loop
+    CONFIG:     memory_eco
     ADMIN:      memory_reindex, memory_reset
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
@@ -797,6 +798,79 @@ def register_memory_tools(
         finally:
             audit.log("memory_status", rid, session_id, _audit_db,
                       outcome, {}, (time.monotonic() - t0) * 1000)
+
+    # =====================================================================
+    # CONFIG: memory_eco  (v0.16)
+    # =====================================================================
+
+    @mcp.tool()
+    def memory_eco(
+        action: str = "status",
+    ) -> Dict[str, Any]:
+        """Toggle or query eco mode state.
+
+        Args:
+            action: "on", "off", or "status" (default: "status").
+
+        Returns:
+            eco_mode: current state after action ("active", "disabled", "not installed").
+            action_taken: what was done.
+        """
+        # EXEMPT from rate limiting (config toggle must always respond)
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        try:
+            eco_config_path = Path(".claude/eco/config.json")
+            eco_disabled = Path(".memory/.eco-disabled")
+
+            # Backward compat: migrate old flag location
+            old_eco_disabled = Path(".claude/eco/.disabled")
+            if old_eco_disabled.exists() and not eco_disabled.exists():
+                try:
+                    eco_disabled.parent.mkdir(parents=True, exist_ok=True)
+                    old_eco_disabled.rename(eco_disabled)
+                except OSError:
+                    pass
+
+            if action == "on":
+                if not eco_config_path.exists():
+                    return {
+                        "status": "error",
+                        "eco_mode": "not installed",
+                        "message": "eco mode not installed. Run install_eco.sh first.",
+                    }
+                eco_disabled.unlink(missing_ok=True)
+                return {
+                    "status": "ok",
+                    "eco_mode": "active",
+                    "action_taken": "enabled",
+                }
+            elif action == "off":
+                eco_disabled.parent.mkdir(parents=True, exist_ok=True)
+                eco_disabled.touch()
+                return {
+                    "status": "ok",
+                    "eco_mode": "disabled",
+                    "action_taken": "disabled",
+                }
+            else:
+                # status
+                eco_state = "disabled" if eco_disabled.exists() else (
+                    "active" if eco_config_path.exists() else "not installed"
+                )
+                return {
+                    "status": "ok",
+                    "eco_mode": eco_state,
+                    "action_taken": "none",
+                }
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Eco toggle failed: {e}"}
+        finally:
+            audit.log("memory_eco", rid, session_id, _audit_db,
+                      outcome, {"action": action}, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
     # COMPARE: memory_diff  (v0.15)
@@ -1618,7 +1692,7 @@ def register_memory_tools(
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 18 memory MCP tools (with L0/L1 middleware)")
+    logger.info("Registered 19 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------

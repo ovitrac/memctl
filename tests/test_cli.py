@@ -1021,6 +1021,55 @@ class TestStatusEcoFlag:
 
 
 # ---------------------------------------------------------------------------
+# eco (E5–E8)
+# ---------------------------------------------------------------------------
+
+
+class TestEcoCLI:
+    """Tests for memctl eco command (v0.16)."""
+
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def test_e5_eco_status_default(self, tmp_path):
+        """E5: memctl eco (no arg) → reports status."""
+        r = run(["eco", "--json"], cwd=str(tmp_path),
+                env={"PYTHONPATH": self._PROJECT_ROOT})
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["eco_mode"] == "not installed"
+
+    def test_e6_eco_off_creates_flag(self, tmp_path):
+        """E6: memctl eco off → creates .memory/.eco-disabled."""
+        (tmp_path / ".memory").mkdir()
+        r = run(["eco", "off"], cwd=str(tmp_path),
+                env={"PYTHONPATH": self._PROJECT_ROOT})
+        assert r.returncode == 0
+        assert (tmp_path / ".memory" / ".eco-disabled").exists()
+        assert "disabled" in r.stdout.lower()
+
+    def test_e7_eco_on_removes_flag(self, tmp_path):
+        """E7: memctl eco on → removes flag when config exists."""
+        mem_dir = tmp_path / ".memory"
+        mem_dir.mkdir()
+        (mem_dir / ".eco-disabled").touch()
+        eco_dir = tmp_path / ".claude" / "eco"
+        eco_dir.mkdir(parents=True)
+        (eco_dir / "config.json").write_text('{"db_path": "x"}')
+        r = run(["eco", "on"], cwd=str(tmp_path),
+                env={"PYTHONPATH": self._PROJECT_ROOT})
+        assert r.returncode == 0
+        assert not (mem_dir / ".eco-disabled").exists()
+        assert "enabled" in r.stdout.lower()
+
+    def test_e8_eco_on_not_installed(self, tmp_path):
+        """E8: memctl eco on without config → exit 1."""
+        r = run(["eco", "on"], cwd=str(tmp_path),
+                env={"PYTHONPATH": self._PROJECT_ROOT})
+        assert r.returncode == 1
+        assert "not installed" in r.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
 # diff (D15–D19)
 # ---------------------------------------------------------------------------
 

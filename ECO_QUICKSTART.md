@@ -541,7 +541,7 @@ SQLite with FTS5 is very space-efficient.
 | Evaluate eco with your team | [extras/eco/PILOT.md](extras/eco/PILOT.md) |
 | Learn the general memctl CLI | [QUICKSTART.md](QUICKSTART.md) |
 | Set up defense-in-depth hooks | [README.md — Defense in Depth](README.md#defense-in-depth-v08) |
-| See all 18 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
+| See all 19 MCP tools | [README.md — MCP Tools](README.md#mcp-tools) |
 | Explore the Python API | [README.md — Python API](README.md#python-api) |
 
 ---

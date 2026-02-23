@@ -4,6 +4,25 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.0] — 2026-02-23
+
+### Added
+- **`memctl eco` CLI command**: toggle eco mode from the command line (`memctl eco on`,
+  `memctl eco off`, `memctl eco status`). Supports `--json` flag. Backward-compat
+  migration from `.claude/eco/.disabled` → `.memory/.eco-disabled`.
+- **`memory_eco` MCP tool (#19)**: toggle or query eco mode state via MCP.
+  Claude Code's natural reflex is MCP tool calls — this avoids the Bash permission
+  prompt entirely. Returns structured JSON (`eco_mode`, `action_taken`).
+  Exempt from rate limiting. Full audit trail.
+
+### Changed
+- MCP tool count: 18 → 19 (`memory_eco` added).
+- `/eco` slash command updated: MCP primary (`memory_eco`) + CLI fallback (`memctl eco`).
+
+### Tests
+- E1–E4: MCP tool tests for `memory_eco` (status/on/off/on-with-config).
+- E5–E8: CLI subprocess tests for `memctl eco` (status/off/on/on-not-installed).
+
 ## [0.15.2] — 2026-02-23
 
 ### Added

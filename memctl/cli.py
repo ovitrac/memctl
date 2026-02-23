@@ -657,6 +657,56 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: eco  (toggle eco mode)
+# ===========================================================================
+
+
+def cmd_eco(args: argparse.Namespace) -> None:
+    """Toggle or query eco mode state."""
+    action = getattr(args, "action", "status") or "status"
+    eco_config_path = Path(".claude/eco/config.json")
+    eco_disabled = Path(".memory/.eco-disabled")
+
+    # Backward compat: migrate old flag location
+    old_eco_disabled = Path(".claude/eco/.disabled")
+    if old_eco_disabled.exists() and not eco_disabled.exists():
+        try:
+            eco_disabled.parent.mkdir(parents=True, exist_ok=True)
+            old_eco_disabled.rename(eco_disabled)
+            _info("Migrated .claude/eco/.disabled → .memory/.eco-disabled")
+        except OSError:
+            pass
+
+    if action == "on":
+        if not eco_config_path.exists():
+            _warn("eco mode not installed. Run: bash \"$(memctl scripts-path)/install_eco.sh\"")
+            sys.exit(1)
+        try:
+            eco_disabled.unlink(missing_ok=True)
+        except OSError as e:
+            _warn(f"Failed to enable eco: {e}")
+            sys.exit(2)
+        print("eco mode enabled. Using memory_inspect, memory_recall, and persistent memory.")
+    elif action == "off":
+        try:
+            eco_disabled.parent.mkdir(parents=True, exist_ok=True)
+            eco_disabled.touch()
+        except OSError as e:
+            _warn(f"Failed to disable eco: {e}")
+            sys.exit(2)
+        print("eco mode disabled. Using native Read/View only.")
+    else:
+        # status
+        eco_state = "disabled" if eco_disabled.exists() else (
+            "active" if eco_config_path.exists() else "not installed"
+        )
+        if getattr(args, "json", False):
+            print(json.dumps({"eco_mode": eco_state}, indent=2))
+        else:
+            print(f"eco mode: {eco_state}")
+
+
+# ===========================================================================
 # Command: diff  (compare two items or item vs revision)
 # ===========================================================================
 
@@ -1607,6 +1657,15 @@ def main() -> None:
     # -- status ------------------------------------------------------------
     p_status = sub.add_parser("status", parents=[_common], help="Project memory health dashboard")
     p_status.set_defaults(func=cmd_status)
+
+    # -- eco ---------------------------------------------------------------
+    p_eco = sub.add_parser("eco", parents=[_common], help="Toggle eco mode (on/off/status)")
+    p_eco.add_argument(
+        "action", nargs="?", default="status",
+        choices=["on", "off", "status"],
+        help="Action: on, off, or status (default: status)",
+    )
+    p_eco.set_defaults(func=cmd_eco)
 
     # -- diff --------------------------------------------------------------
     p_diff = sub.add_parser(

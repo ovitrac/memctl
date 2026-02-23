@@ -1,5 +1,5 @@
 """
-Tests for all 18 MCP tools in memctl.mcp.tools.
+Tests for all 19 MCP tools in memctl.mcp.tools.
 
 Tests use direct function calls (not MCP protocol) via a mock FastMCP.
 memory_ask and memory_loop tests are marked with skipif since they
@@ -70,16 +70,16 @@ def call(env, tool_name, **kwargs):
 
 
 class TestToolCount:
-    def test_d20_18_tools_registered(self, mcp_env):
-        """D20: 18 tools registered."""
-        assert len(mcp_env["mcp"].tools) == 18
+    def test_d20_19_tools_registered(self, mcp_env):
+        """D20: 19 tools registered."""
+        assert len(mcp_env["mcp"].tools) == 19
 
     def test_d21_all_tool_names(self, mcp_env):
-        """D21: memory_diff in expected set."""
+        """D21: memory_eco in expected set."""
         expected = {
             "memory_recall", "memory_search", "memory_propose", "memory_write",
             "memory_read", "memory_stats", "memory_status", "memory_consolidate",
-            "memory_diff",
+            "memory_diff", "memory_eco",
             "memory_mount", "memory_sync", "memory_inspect",
             "memory_ask", "memory_export", "memory_import", "memory_loop",
             "memory_reindex", "memory_reset",
@@ -553,3 +553,45 @@ class TestMemoryDiff:
         result = call(mcp_env, "memory_diff", id1=item.id, id2=item.id)
         assert result["status"] == "ok"
         assert result["identical"] is True
+
+
+# ---------------------------------------------------------------------------
+# memory_eco (E1–E4)
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryEco:
+    def test_e1_eco_status_not_installed(self, mcp_env):
+        """E1: memory_eco(status) → not installed when no config."""
+        result = call(mcp_env, "memory_eco", action="status")
+        assert result["status"] == "ok"
+        assert result["eco_mode"] == "not installed"
+
+    def test_e2_eco_on_not_installed(self, mcp_env, tmp_path):
+        """E2: memory_eco(on) → error when eco not installed."""
+        result = call(mcp_env, "memory_eco", action="on")
+        assert result["status"] == "error"
+        assert result["eco_mode"] == "not installed"
+
+    def test_e3_eco_off_creates_flag(self, mcp_env, tmp_path, monkeypatch):
+        """E3: memory_eco(off) → creates .memory/.eco-disabled."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".memory").mkdir(exist_ok=True)
+        result = call(mcp_env, "memory_eco", action="off")
+        assert result["status"] == "ok"
+        assert result["eco_mode"] == "disabled"
+        assert (tmp_path / ".memory" / ".eco-disabled").exists()
+
+    def test_e4_eco_on_removes_flag(self, mcp_env, tmp_path, monkeypatch):
+        """E4: memory_eco(on) with config → removes flag, reports active."""
+        monkeypatch.chdir(tmp_path)
+        eco_dir = tmp_path / ".claude" / "eco"
+        eco_dir.mkdir(parents=True)
+        (eco_dir / "config.json").write_text('{"db_path": "x"}')
+        mem_dir = tmp_path / ".memory"
+        mem_dir.mkdir(exist_ok=True)
+        (mem_dir / ".eco-disabled").touch()
+        result = call(mcp_env, "memory_eco", action="on")
+        assert result["status"] == "ok"
+        assert result["eco_mode"] == "active"
+        assert not (mem_dir / ".eco-disabled").exists()
