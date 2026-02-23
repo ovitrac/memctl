@@ -189,10 +189,11 @@ class ConsolidationPipeline:
 
     def _distinct_scopes(self) -> List[str]:
         """Return distinct scope values from non-archived STM items."""
-        rows = self._store._conn.execute(
-            "SELECT DISTINCT scope FROM memory_items "
-            "WHERE tier='stm' AND archived=0"
-        ).fetchall()
+        with self._store._lock:
+            rows = self._store._conn.execute(
+                "SELECT DISTINCT scope FROM memory_items "
+                "WHERE tier='stm' AND archived=0"
+            ).fetchall()
         return [r[0] for r in rows if r[0]]
 
     def run(

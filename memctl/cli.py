@@ -650,7 +650,7 @@ def cmd_status(args: argparse.Namespace) -> None:
             _warn("Tokenizer mismatch — run: memctl reindex")
         print(f"  Mounts:    {len(mounts)}")
         for m in mounts:
-            print(f"    {m.get('name', '?'):12s} -> {m.get('path', '?')}")
+            print(f"    {(m.get('name') or '(unnamed)'):12s} -> {m.get('path', '?')}")
         if last_scan:
             print(f"  Last scan: {last_scan}")
         print(f"  Events:    {stats['events_count']}")

@@ -1347,6 +1347,14 @@ class MemoryStore:
             except Exception:
                 self._conn.execute("ROLLBACK")
                 raise
+            # Reclaim disk space.  In WAL mode, VACUUM writes the
+            # compacted DB to the WAL; a TRUNCATE checkpoint then
+            # applies it to the main file and removes the WAL.
+            try:
+                self._conn.execute("VACUUM")
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.OperationalError:
+                pass  # Best-effort: fails if another connection is active
         return {"dry_run": False, **counts}
 
     # -- Export/Import -----------------------------------------------------

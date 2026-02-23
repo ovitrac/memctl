@@ -4,6 +4,22 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.3] — 2026-02-23
+
+### Fixed
+- **`reset()` now reclaims disk space.** After `DELETE FROM` on all content
+  tables, `VACUUM` + `PRAGMA wal_checkpoint(TRUNCATE)` rewrites and compacts
+  the database file. Previously the file retained its peak size forever
+  (freelist pages but no reclamation). 96% size reduction on typical resets.
+- **Thread-safe `_distinct_scopes()`.** Multi-scope consolidation now acquires
+  the store lock before querying distinct scopes, preventing potential
+  concurrent-access issues.
+- **`memctl status` null mount name.** Mounts with `name=None` no longer crash
+  the status display (`NoneType.__format__` error).
+
+### Tests
+- Total: 1094 passed, 5 skipped.
+
 ## [0.16.2] — 2026-02-23
 
 ### Fixed (Structural Integrity — first production feedback)
