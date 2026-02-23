@@ -31,3 +31,6 @@ or default to `.memory/memory.db`.
 
 - Stored in STM by default. Policy engine applies (secrets, injection, PII).
 - Use `/recall` to retrieve later. Use `memory_consolidate` to promote.
+- For architectural findings, use `type="decision"` or `type="pattern"`.
+  For class inventories, use `type="definition"`.
+  These types auto-promote to LTM during consolidation.

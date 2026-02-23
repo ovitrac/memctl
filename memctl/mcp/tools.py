@@ -1,5 +1,5 @@
 """
-memctl MCP Tools — 19 memory tools for MCP integration.
+memctl MCP Tools — 20 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
 Each tool follows the locked middleware order:
@@ -15,7 +15,7 @@ Tool hierarchy:
     SECONDARY:  memory_search    — interactive discovery
     WRITE:      memory_propose   — governed write, memory_write — privileged
     CRUD:       memory_read      — read by IDs
-    LIFECYCLE:  memory_consolidate, memory_stats
+    LIFECYCLE:  memory_consolidate, memory_stats, memory_promote
     COMPARE:    memory_diff
     FOLDER:     memory_mount, memory_sync, memory_inspect, memory_ask
     DATA:       memory_export, memory_import
@@ -62,7 +62,7 @@ def register_memory_tools(
     audit=None,
 ) -> None:
     """
-    Register all 18 memory MCP tools on a FastMCP server instance.
+    Register all 20 memory MCP tools on a FastMCP server instance.
 
     Args:
         mcp: FastMCP server instance.
@@ -1640,6 +1640,83 @@ def register_memory_tools(
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
+    # LIFECYCLE: promote  (v0.17)
+    # =====================================================================
+
+    @mcp.tool()
+    def memory_promote(
+        id: str,
+        tier: str = "ltm",
+    ) -> Dict[str, Any]:
+        """Promote a memory item to a higher tier (STM→MTM, STM→LTM, MTM→LTM).
+
+        This is human-initiated curation, not automatic promotion.
+        The consolidation algorithm remains deterministic; promote is
+        a separate, explicit action for curating key knowledge.
+
+        Args:
+            id: Memory item ID to promote (e.g. MEM-abc123).
+            tier: Target tier — "mtm" or "ltm" (default: "ltm").
+
+        Returns:
+            Status dict with from_tier and to_tier.
+        """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        try:
+            if rate_limiter:
+                rate_limiter.check_write(session_id)
+
+            item = store.read_item(id)
+            if item is None:
+                outcome = "not_found"
+                return {"status": "error", "message": f"Item not found: {id}"}
+
+            order = {"stm": 0, "mtm": 1, "ltm": 2}
+            current_rank = order.get(item.tier, 0)
+            target_rank = order.get(tier, 0)
+
+            if tier not in order:
+                outcome = "invalid_tier"
+                return {"status": "error", "message": f"Invalid tier: {tier}"}
+
+            if target_rank <= current_rank:
+                outcome = "already_at_tier"
+                return {
+                    "status": "error",
+                    "message": f"Item already at {item.tier} (target: {tier})",
+                }
+
+            from_tier = item.tier
+            store.update_item(item.id, {"tier": tier})
+            store._log_event("promote", item.id, {
+                "from_tier": from_tier,
+                "to_tier": tier,
+            }, "")
+            store._conn.commit()
+
+            detail = {"id": id, "from_tier": from_tier, "to_tier": tier}
+            return {
+                "status": "ok",
+                "id": id,
+                "from_tier": from_tier,
+                "to_tier": tier,
+            }
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Promote failed: {e}"}
+        finally:
+            audit.log("memory_promote", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
+
+    # =====================================================================
     # ADMIN: reset  (v0.13)
     # =====================================================================
 
@@ -1701,7 +1778,7 @@ def register_memory_tools(
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 19 memory MCP tools (with L0/L1 middleware)")
+    logger.info("Registered 20 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------

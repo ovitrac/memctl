@@ -287,6 +287,68 @@ class TestShow:
 
 
 # ---------------------------------------------------------------------------
+# promote (P6 — v0.17)
+# ---------------------------------------------------------------------------
+
+
+class TestPromote:
+    def test_p6_t1_promote_stm_to_ltm(self, populated_db):
+        """P6-T1: Promote STM → LTM works."""
+        # Get an item ID
+        r = run(["search", "architecture", "--db", populated_db, "--json", "-q"])
+        results = json.loads(r.stdout)
+        item_id = results[0]["id"]
+
+        # Promote it
+        r2 = run(["promote", item_id, "--tier", "ltm", "--db", populated_db, "-q"])
+        assert r2.returncode == 0
+        assert "ltm" in r2.stdout.lower()
+
+        # Verify tier changed
+        r3 = run(["show", item_id, "--db", populated_db, "--json", "-q"])
+        data = json.loads(r3.stdout)
+        assert data["tier"] == "ltm"
+
+    def test_p6_t2_promote_stm_to_mtm(self, populated_db):
+        """P6-T2: Promote STM → MTM works."""
+        r = run(["search", "architecture", "--db", populated_db, "--json", "-q"])
+        results = json.loads(r.stdout)
+        item_id = results[0]["id"]
+
+        r2 = run(["promote", item_id, "--tier", "mtm", "--db", populated_db, "-q"])
+        assert r2.returncode == 0
+
+    def test_p6_t3_promote_already_at_tier(self, populated_db):
+        """P6-T3: Promote LTM → LTM exits 1."""
+        r = run(["search", "architecture", "--db", populated_db, "--json", "-q"])
+        results = json.loads(r.stdout)
+        item_id = results[0]["id"]
+
+        # First promote to LTM
+        run(["promote", item_id, "--tier", "ltm", "--db", populated_db, "-q"])
+        # Try again
+        r2 = run(["promote", item_id, "--tier", "ltm", "--db", populated_db, "-q"])
+        assert r2.returncode == 1
+
+    def test_p6_t4_promote_nonexistent(self, populated_db):
+        """P6-T4: Promote nonexistent ID exits 1."""
+        r = run(["promote", "MEM-does-not-exist", "--db", populated_db, "-q"])
+        assert r.returncode == 1
+
+    def test_p6_t5_promote_json_output(self, populated_db):
+        """P6-T5: Promote with --json returns structured output."""
+        r = run(["search", "architecture", "--db", populated_db, "--json", "-q"])
+        results = json.loads(r.stdout)
+        item_id = results[0]["id"]
+
+        r2 = run(["promote", item_id, "--tier", "ltm", "--db", populated_db, "--json", "-q"])
+        assert r2.returncode == 0
+        data = json.loads(r2.stdout)
+        assert data["status"] == "ok"
+        assert data["to_tier"] == "ltm"
+
+
+# ---------------------------------------------------------------------------
 # stats
 # ---------------------------------------------------------------------------
 

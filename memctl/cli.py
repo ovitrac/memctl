@@ -9,6 +9,7 @@ Commands:
     memctl show   <id>                       — display single memory item
     memctl stats                             — store metrics
     memctl status                            — project memory health dashboard
+    memctl promote <id> [--tier ltm]          — promote item to higher tier
     memctl diff   <id1> [<id2>] [--json]     — compare two items or item vs revision
     memctl consolidate [--dry-run]           — merge + promote STM items
     memctl loop   "query" --llm CMD          — bounded recall-answer loop
@@ -704,6 +705,52 @@ def cmd_eco(args: argparse.Namespace) -> None:
             print(json.dumps({"eco_mode": eco_state}, indent=2))
         else:
             print(f"eco mode: {eco_state}")
+
+
+# ===========================================================================
+# Command: promote  (promote item to higher tier)
+# ===========================================================================
+
+
+def cmd_promote(args: argparse.Namespace) -> None:
+    """Promote a memory item to a higher tier."""
+    db_path = _resolve_db(args)
+    store = _open_store(db_path)
+
+    item = store.read_item(args.id)
+    if item is None:
+        _warn(f"Item not found: {args.id}")
+        store.close()
+        sys.exit(1)
+
+    target = args.tier
+    order = {"stm": 0, "mtm": 1, "ltm": 2}
+    current_rank = order.get(item.tier, 0)
+    target_rank = order.get(target, 0)
+
+    if target_rank <= current_rank:
+        _warn(f"Item already at {item.tier} (target: {target})")
+        store.close()
+        sys.exit(1)
+
+    store.update_item(item.id, {"tier": target})
+    store._log_event("promote", item.id, {
+        "from_tier": item.tier,
+        "to_tier": target,
+    }, "")
+    store._conn.commit()
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "status": "ok",
+            "id": item.id,
+            "from_tier": item.tier,
+            "to_tier": target,
+        }, indent=2))
+    else:
+        print(f"Promoted {item.id}: {item.tier} → {target}")
+
+    store.close()
 
 
 # ===========================================================================
@@ -1671,6 +1718,18 @@ def main() -> None:
         help="Action: on, off, or status (default: status)",
     )
     p_eco.set_defaults(func=cmd_eco)
+
+    # -- promote -----------------------------------------------------------
+    p_promote = sub.add_parser(
+        "promote", parents=[_common],
+        help="Promote a memory item to a higher tier",
+    )
+    p_promote.add_argument("id", metavar="MEM-ID", help="Memory item ID to promote")
+    p_promote.add_argument(
+        "--tier", default="ltm", choices=["mtm", "ltm"],
+        help="Target tier (default: ltm)",
+    )
+    p_promote.set_defaults(func=cmd_promote)
 
     # -- diff --------------------------------------------------------------
     p_diff = sub.add_parser(

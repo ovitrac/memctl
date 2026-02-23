@@ -28,3 +28,7 @@ Behavior:
   If eco_mode is "not installed": report eco not installed and suggest install_eco.sh.
 
 - **No argument** → Same as "status".
+
+**Tip:** Use `/remember` to store your observations. Raw content is
+indexed automatically — your analytical findings are not. Use
+`type="decision"` for architectural findings (auto-promotes to LTM).

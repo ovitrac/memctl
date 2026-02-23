@@ -13,6 +13,7 @@ from memctl.ingest import (
     corpus_stats,
     ingest_file,
     resolve_sources,
+    _expand_camel_case,
     _file_sha256,
     _infer_tags_from_path,
     _infer_title,
@@ -217,3 +218,60 @@ class TestCorpusStats:
         assert stats["total_lines"] > 0
         assert stats["total_tokens"] > 0
         assert len(stats["per_file"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# CamelCase expansion (P5 — v0.17)
+# ---------------------------------------------------------------------------
+
+
+class TestCamelCaseExpansion:
+    def test_p5_t1_pascal_case(self):
+        """P5-T1: PascalCase identifier splits correctly."""
+        result = _expand_camel_case("IncidentMetierService")
+        assert "incident" in result
+        assert "metier" in result
+        assert "service" in result
+
+    def test_p5_t1b_camel_case(self):
+        """P5-T1b: camelCase identifier splits correctly."""
+        result = _expand_camel_case("getUserName")
+        assert "get" in result
+        assert "user" in result
+        assert "name" in result
+
+    def test_p5_t3_non_camel_unchanged(self):
+        """P5-T3: Non-camelCase content returns empty string."""
+        assert _expand_camel_case("regular text with no identifiers") == ""
+
+    def test_p5_t4_all_caps_not_expanded(self):
+        """P5-T4: ALL_CAPS and snake_case are not expanded."""
+        assert _expand_camel_case("SECRET_PATTERNS") == ""
+        assert _expand_camel_case("my_function_name") == ""
+
+    def test_p5_t2_ingest_produces_camel_line(self, store, tmp_path):
+        """P5-T2: Ingested Java file contains [camel: ...] line in content."""
+        java = tmp_path / "Test.java"
+        java.write_text(
+            "public class IncidentMetierService {\n"
+            "    public TraitementBpmService getService() { return null; }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        result = ingest_file(store, str(java), format_mode="auto")
+        assert result.chunks_created >= 1
+
+        item = store.read_item(result.item_ids[0])
+        assert "[camel:" in item.content
+        assert "incident" in item.content
+        assert "metier" in item.content
+
+    def test_mixed_identifiers(self):
+        """Multiple identifiers in same text are all expanded."""
+        text = "The IncidentService calls getUserProfile via RestController"
+        result = _expand_camel_case(text)
+        assert "incident" in result
+        assert "service" in result
+        assert "get" in result
+        assert "user" in result
+        assert "profile" in result

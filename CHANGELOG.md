@@ -4,6 +4,57 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.0] — 2026-02-23
+
+### Added (Workflow Quality — P4 + P5 + P6)
+- **P4: Write-back reinforcement in eco.** "Persist Findings" section added
+  to `ECO.md` escalation ladder. `/eco on` hint and `/remember` type guidance
+  nudge Claude to store analytical findings (not just raw file content).
+  `type="decision"` and `type="definition"` auto-promote to LTM.
+- **P5: CamelCase tokenization.** `_expand_camel_case()` in `ingest.py`
+  splits PascalCase and camelCase identifiers (e.g. `IncidentMetierService`
+  → `incident metier service`) and appends them as `[camel: ...]` metadata
+  lines during ingestion. FTS5 can now match partial segments. Existing
+  items require `memctl reindex` after re-ingestion.
+- **P6: `memctl promote` command.** Manual tier promotion: `memctl promote
+  MEM-abc123 --tier ltm`. Supports `--json` output. MCP: `memory_promote(id,
+  tier)` (#20). Exits 1 if already at target tier or item not found.
+- **MCP tools:** 20 (added `memory_promote`).
+
+### Tests
+- P4-T1–T3: Eco template content validation.
+- P5-T1–T4 + 2 integration: CamelCase expansion + ingestion pipeline.
+- P6-T1–T5: Promote CLI (STM→LTM, STM→MTM, already-at-tier, nonexistent, JSON).
+- MCP tool count updated: 19 → 20.
+- Total: 1119 passed, 5 skipped.
+
+## [0.16.4] — 2026-02-23
+
+### Added (Structural Integrity — P2 + P3)
+- **P2: Content-similarity safety floor.** `_content_similar()` uses
+  `difflib.SequenceMatcher` on the first 1000 chars of each item pair.
+  Items with content similarity below `min_content_similarity` (default 0.15)
+  never cluster, regardless of tag overlap. Catches gross mismatches
+  (e.g. `Incident.java` vs `weblogic-application.xml`) while allowing
+  legitimate clustering of related items. Threshold 0.0 disables the gate.
+- **P3: Path-bonus effective similarity.** `_effective_similarity()` adds a
+  path-proximity bonus to tag Jaccard: +0.15 for same-file items (need only
+  Jaccard >= 0.55 to reach the 0.7 threshold), +0.05 for same-directory
+  (need Jaccard >= 0.65). Different-directory items get no bonus.
+- **Three-gate clustering.** `_coarse_cluster()` now requires ALL three
+  conditions: (1) effective similarity >= 0.7, (2) source affinity (same
+  parent directory), (3) content similarity >= 0.15. This is the full
+  clustering model from the Structural Integrity workplan.
+- **`ConsolidateConfig.min_content_similarity`**: New config field (float,
+  default 0.15, range [0.0, 1.0]). Validated in `config.py`.
+
+### Tests
+- `TestContentSimilarity`: 5 tests (dissimilar blocked, similar passes,
+  threshold=0 disables, performance <2s for 500 pairs, integration).
+- `TestEffectiveSimilarity`: 6 tests (same-file bonus, different-file no
+  bonus, same-dir small bonus, cap at 1.0, no-provenance, integration).
+- Total: 1105 passed, 5 skipped.
+
 ## [0.16.3] — 2026-02-23
 
 ### Fixed

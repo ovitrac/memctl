@@ -352,6 +352,31 @@ Premature fallback to native `Read` defeats the eco mode purpose.
 
 **Rule:** If you discovered something that would be useful in a future session, propose it.
 
+## Persist Findings (write-back reinforcement)
+
+After analysis, if you produced:
+- Architectural observations (module boundaries, coupling patterns)
+- Cross-file relationships (call chains, inheritance trees)
+- Design decisions or risk assessments
+- Sprint/package organization findings
+- Class inventories or dependency summaries
+
+Store them:
+```
+/remember <distilled finding>
+```
+or via MCP:
+```
+memory_propose(title="...", content="...", tags=[...], type="decision")
+```
+
+Raw file content is already indexed by memctl. What needs storing is **your analysis** —
+the insights that emerge from connecting multiple files, not the file contents themselves.
+
+For architectural findings, use `type="decision"` or `type="pattern"`.
+For class inventories, use `type="definition"`.
+These types auto-promote to LTM during consolidation (`auto_promote_types`).
+
 ## When to use memory_consolidate
 
 - After a session with many stored findings (5+ STM items).

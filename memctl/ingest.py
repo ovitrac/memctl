@@ -208,6 +208,29 @@ def _text_sha256(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _expand_camel_case(text: str) -> str:
+    """Extract camelCase/PascalCase identifiers and return their split components.
+
+    Finds multi-word identifiers (e.g. IncidentMetierService, getUserName)
+    and returns a deduplicated, sorted, space-separated string of their
+    lowercase components.  This enables FTS5 to match partial segments
+    that are invisible inside unsplit identifiers.
+
+    ALL_CAPS and snake_case identifiers are not expanded (they are already
+    tokenizable by FTS5).
+    """
+    # Match PascalCase: two or more uppercase-led segments
+    identifiers = re.findall(r'[A-Z][a-z]+(?:[A-Z][a-z]+)+', text)
+    # Also match camelCase: lowercase start + one or more uppercase segments
+    identifiers += re.findall(r'[a-z]+(?:[A-Z][a-z]+)+', text)
+    expanded: set = set()
+    for ident in identifiers:
+        parts = re.findall(r'[A-Z]?[a-z]+', ident)
+        if len(parts) >= 2:
+            expanded.update(p.lower() for p in parts)
+    return " ".join(sorted(expanded))
+
+
 def _infer_title(text: str, fallback: str) -> str:
     """Extract title from the first markdown heading, or use fallback."""
     for line in text.split("\n")[:20]:
@@ -368,6 +391,11 @@ def ingest_file(
         # Prefix content with provenance metadata
         header = f"[path:{path} chunk:{i} lines:{start_line}-{end_line}]"
         content = f"{header}\n{chunk_text}"
+
+        # Append camelCase expansion for FTS5 discoverability
+        camel_tokens = _expand_camel_case(chunk_text)
+        if camel_tokens:
+            content = f"{content}\n[camel: {camel_tokens}]"
 
         item = MemoryItem(
             tier="stm",

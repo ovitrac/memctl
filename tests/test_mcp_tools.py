@@ -70,16 +70,16 @@ def call(env, tool_name, **kwargs):
 
 
 class TestToolCount:
-    def test_d20_19_tools_registered(self, mcp_env):
-        """D20: 19 tools registered."""
-        assert len(mcp_env["mcp"].tools) == 19
+    def test_d20_20_tools_registered(self, mcp_env):
+        """D20: 20 tools registered."""
+        assert len(mcp_env["mcp"].tools) == 20
 
     def test_d21_all_tool_names(self, mcp_env):
-        """D21: memory_eco in expected set."""
+        """D21: memory_promote in expected set."""
         expected = {
             "memory_recall", "memory_search", "memory_propose", "memory_write",
             "memory_read", "memory_stats", "memory_status", "memory_consolidate",
-            "memory_diff", "memory_eco",
+            "memory_diff", "memory_eco", "memory_promote",
             "memory_mount", "memory_sync", "memory_inspect",
             "memory_ask", "memory_export", "memory_import", "memory_loop",
             "memory_reindex", "memory_reset",

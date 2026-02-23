@@ -300,3 +300,30 @@ def test_d28_diff_read_only():
     """D28: diff.md contains 'read-only'."""
     content = (_templates_dir() / "commands" / "diff.md").read_text(encoding="utf-8")
     assert "read-only" in content
+
+
+# ---------------------------------------------------------------------------
+# P4: Write-back reinforcement (v0.17)
+# ---------------------------------------------------------------------------
+
+
+def test_p4_t1_eco_md_persist_findings():
+    """P4-T1: ECO.md contains Persist Findings section."""
+    eco_md = Path(__file__).parent.parent / "extras" / "eco" / "ECO.md"
+    content = eco_md.read_text(encoding="utf-8")
+    assert "Persist Findings" in content
+    assert "memory_propose" in content
+
+
+def test_p4_t2_eco_template_remember_hint():
+    """P4-T2: eco.md template mentions /remember."""
+    content = (_templates_dir() / "eco.md").read_text(encoding="utf-8")
+    assert "/remember" in content
+
+
+def test_p4_t3_remember_auto_promote_types():
+    """P4-T3: remember.md mentions auto-promote types."""
+    content = (_templates_dir() / "commands" / "remember.md").read_text(encoding="utf-8")
+    assert "auto-promote" in content
+    assert "decision" in content
+    assert "definition" in content
