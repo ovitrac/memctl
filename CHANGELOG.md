@@ -4,6 +4,14 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.1] — 2026-02-23
+
+### Fixed
+- **`pypdf` moved back to `[docs]` extra** — restores zero core dependencies.
+  `pip install memctl` has no runtime deps; `pip install memctl[docs]` adds PDF
+  + Office support. The `_extract_pdf()` fallback chain (pypdf → pdftotext) is
+  unchanged.
+
 ## [0.17.0] — 2026-02-23
 
 ### Added (Workflow Quality — P4 + P5 + P6)
