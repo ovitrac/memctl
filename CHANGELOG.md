@@ -4,6 +4,24 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.1] — 2026-02-24
+
+### Fixed
+- **`memctl pull` content-hash dedup** — pulling identical content twice no
+  longer creates duplicate items. `store.exists_by_content_hash()` checks for
+  a non-archived item with the same SHA-256 hash before every `write_item()`
+  call. Applies to all three write sites in `cmd_pull()` (structured proposals,
+  chunked notes, single notes). Duplicates are silently skipped (exit 0),
+  consistent with the idempotent ingestion invariant.
+- **MCP write-path dedup** — same content-hash guard applied to `memory_propose`
+  (per-item `action: "duplicate"`) and `memory_write` (`status: "duplicate"`),
+  ensuring consistency across CLI and MCP entry points.
+
+### Tests
+- `test_pull_dedup`: pull identical content twice, verify exactly one item via
+  `stats --json`.
+- Total: 1126 passed, 5 skipped.
+
 ## [0.18.0] — 2026-02-24
 
 ### Added

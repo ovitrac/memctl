@@ -82,6 +82,7 @@ class ConsolidateConfig:
     enabled: bool = True
     stm_threshold: int = 20
     cluster_distance_threshold: float = 0.3
+    min_content_similarity: float = 0.15
     usage_count_for_ltm: int = 5
     auto_promote_types: List[str] = field(
         default_factory=lambda: ["constraint", "decision", "definition"]
@@ -93,6 +94,8 @@ class ConsolidateConfig:
         errors: List[str] = []
         _check_range(errors, "consolidate.cluster_distance_threshold",
                       self.cluster_distance_threshold, 0.0, 1.0, float)
+        _check_range(errors, "consolidate.min_content_similarity",
+                      self.min_content_similarity, 0.0, 1.0, float)
         _check_range(errors, "consolidate.stm_threshold",
                       self.stm_threshold, 1, 10000, int)
         _check_range(errors, "consolidate.usage_count_for_ltm",

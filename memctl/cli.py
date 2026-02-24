@@ -371,6 +371,9 @@ def cmd_pull(args: argparse.Namespace) -> None:
                 if verdict.forced_expires_at:
                     item.expires_at = verdict.forced_expires_at
 
+            if store.exists_by_content_hash(item.content_hash):
+                _info(f"[pull] skip duplicate: {item.title!r}")
+                continue
             store.write_item(item, reason="pull")
             accepted += 1
 
@@ -411,7 +414,10 @@ def cmd_pull(args: argparse.Namespace) -> None:
                 if verdict.action != "reject":
                     if verdict.action == "quarantine" and verdict.forced_non_injectable:
                         item.injectable = False
-                    store.write_item(item, reason="pull")
+                    if store.exists_by_content_hash(item.content_hash):
+                        _info(f"[pull] skip duplicate: {item.title!r}")
+                    else:
+                        store.write_item(item, reason="pull")
 
             _info(f"[pull] Stored as {len(chunks)} note(s): {title}")
         else:
@@ -428,8 +434,11 @@ def cmd_pull(args: argparse.Namespace) -> None:
                 sys.exit(1)
             if verdict.action == "quarantine" and verdict.forced_non_injectable:
                 item.injectable = False
-            store.write_item(item, reason="pull")
-            _info(f"[pull] Stored as note {item.id}: {title}")
+            if store.exists_by_content_hash(item.content_hash):
+                _info(f"[pull] skip duplicate: {item.title!r}")
+            else:
+                store.write_item(item, reason="pull")
+                _info(f"[pull] Stored as note {item.id}: {title}")
 
     store.close()
 

@@ -588,6 +588,15 @@ class MemoryStore:
             self._conn.commit()
         return item
 
+    def exists_by_content_hash(self, ch: str) -> bool:
+        """Check if a non-archived item with this content_hash already exists."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM memory_items WHERE content_hash=? AND archived=0 LIMIT 1",
+                (ch,),
+            ).fetchone()
+            return row is not None
+
     def read_item(self, item_id: str) -> Optional[MemoryItem]:
         """Read a single item by ID."""
         with self._lock:

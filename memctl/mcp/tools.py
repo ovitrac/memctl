@@ -454,6 +454,14 @@ def register_memory_tools(
                             mem_item.expires_at = verdict.forced_expires_at
                         quarantined += 1
 
+                    if store.exists_by_content_hash(mem_item.content_hash):
+                        per_item.append({
+                            "title": mem_item.title,
+                            "action": "duplicate",
+                            "reasons": ["content already exists"],
+                        })
+                        continue
+
                     store.write_item(mem_item, reason="propose")
                     accepted += 1
                     per_item.append({
@@ -584,7 +592,14 @@ def register_memory_tools(
                 if verdict.forced_validation:
                     item.validation = verdict.forced_validation
 
-            # ④c Business logic
+            # ④c Business logic — dedup check
+            if store.exists_by_content_hash(item.content_hash):
+                detail = audit.make_content_detail(content, policy_detail)
+                return {
+                    "status": "duplicate",
+                    "message": "content already exists",
+                }
+
             store.write_item(item, reason="write")
             detail = audit.make_content_detail(content, policy_detail)
 

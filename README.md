@@ -11,8 +11,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.18.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-1125%20passing-brightgreen.svg)](./tests)
+[![Version](https://img.shields.io/badge/version-0.18.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1126%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-20%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -1000,7 +1000,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-1125 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, and environment diagnostics.
+1126 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, and environment diagnostics.
 
 ---
 

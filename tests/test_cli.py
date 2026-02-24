@@ -213,6 +213,22 @@ class TestPull:
         assert any("gRPC" in item.get("title", "") or "gRPC" in item.get("content_preview", "")
                     for item in results)
 
+    def test_pull_dedup(self, db):
+        """Pulling identical content twice must not create duplicate items."""
+        content = "Kafka is used for async event streaming between services."
+        for _ in range(2):
+            r = run(
+                ["pull", "--db", db, "--title", "Kafka note", "-q"],
+                stdin=content,
+            )
+            assert r.returncode == 0
+
+        # stats reports total items — must be exactly 1
+        r2 = run(["stats", "--db", db, "--json", "-q"])
+        assert r2.returncode == 0
+        stats = json.loads(r2.stdout)
+        assert stats["total_items"] == 1
+
 
 # ---------------------------------------------------------------------------
 # search

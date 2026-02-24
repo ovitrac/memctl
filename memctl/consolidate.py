@@ -1,8 +1,10 @@
 """
 Deterministic Consolidation — STM -> MTM -> LTM Promotion
 
-Clusters STM items by type+tags (Jaccard overlap), then merges each cluster
-deterministically: longest content wins, tags/entities union, max confidence.
+Clusters STM items by type + effective similarity (tag Jaccard with path bonus)
++ source affinity (hard gate) + content similarity (safety floor), then merges
+each cluster deterministically: longest content wins, tags/entities union, max
+confidence.
 
 No LLM calls. No embeddings. No graph-RAG. Fully deterministic.
 
@@ -25,6 +27,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set
 
 from memctl.config import ConsolidateConfig
@@ -64,16 +67,63 @@ def _source_affinity(a: MemoryItem, b: MemoryItem) -> bool:
     return os.path.dirname(src_a) == os.path.dirname(src_b)
 
 
+def _content_similar(a: MemoryItem, b: MemoryItem, threshold: float) -> bool:
+    """True if content similarity exceeds threshold.
+
+    Safety gate: catches gross mismatches (Incident.java vs.
+    weblogic-application.xml) while allowing legitimate clustering
+    of related items.  Threshold 0.0 disables the gate.
+
+    Uses first 1000 chars for performance (~0.1ms per comparison).
+    """
+    if threshold <= 0.0:
+        return True  # Gate disabled
+    ratio = SequenceMatcher(
+        None, a.content[:1000], b.content[:1000],
+    ).ratio()
+    return ratio >= threshold
+
+
+def _effective_similarity(
+    item_a: MemoryItem, item_b: MemoryItem,
+    tags_a: Set[str], tags_b: Set[str],
+) -> float:
+    """Tag Jaccard with path-proximity bonus.
+
+    Same-file items get +0.15 (need only Jaccard >= 0.55 to reach 0.7).
+    Same-directory items get +0.05 (need Jaccard >= 0.65).
+    Different-directory items get no bonus.
+    """
+    tag_sim = _jaccard(tags_a, tags_b)
+
+    src_a = item_a.provenance.source_id if item_a.provenance else ""
+    src_b = item_b.provenance.source_id if item_b.provenance else ""
+
+    if src_a and src_b:
+        if src_a == src_b:
+            path_bonus = 0.15     # Same file
+        elif os.path.dirname(src_a) == os.path.dirname(src_b):
+            path_bonus = 0.05     # Same directory
+        else:
+            path_bonus = 0.0
+    else:
+        path_bonus = 0.0
+
+    return min(1.0, tag_sim + path_bonus)
+
+
 def _coarse_cluster(
     items: List[MemoryItem],
     distance_threshold: float = 0.3,
+    min_content_similarity: float = 0.15,
 ) -> List[List[MemoryItem]]:
     """
-    Cluster items by type + tag overlap (Jaccard) + source affinity.
+    Cluster items by type + effective similarity + source affinity + content.
 
-    Two items are in the same cluster if they share the same type AND
-    their Jaccard tag similarity >= (1 - distance_threshold) AND
-    they come from the same source directory (hard gate).
+    Three conditions must ALL pass for two items to cluster:
+    1. Effective tag similarity (with path bonus) >= (1 - distance_threshold)
+    2. Source affinity — same parent directory (hard gate)
+    3. Content similarity >= min_content_similarity (safety floor)
     """
     similarity_threshold = 1.0 - distance_threshold
 
@@ -98,8 +148,13 @@ def _coarse_cluster(
                 if item_b.id in assigned:
                     continue
                 tags_b = set(t.lower() for t in item_b.tags)
-                if (_jaccard(tags_a, tags_b) >= similarity_threshold
-                        and _source_affinity(item_a, item_b)):
+                eff_sim = _effective_similarity(
+                    item_a, item_b, tags_a, tags_b,
+                )
+                if (eff_sim >= similarity_threshold
+                        and _source_affinity(item_a, item_b)
+                        and _content_similar(
+                            item_a, item_b, min_content_similarity)):
                     cluster.append(item_b)
                     assigned.add(item_b.id)
             if len(cluster) >= 2:
@@ -263,6 +318,7 @@ class ConsolidationPipeline:
         clusters = _coarse_cluster(
             items,
             distance_threshold=self._config.cluster_distance_threshold,
+            min_content_similarity=self._config.min_content_similarity,
         )
         stats["clusters_found"] = len(clusters)
 
