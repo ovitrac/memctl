@@ -4,6 +4,21 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.0] — 2026-02-24
+
+### Added
+- **`memctl doctor` command** — environment health check. Runs 10 diagnostic
+  checks (Python version, sqlite3 module, FTS5 support, DB existence, WAL mode,
+  schema version, integrity check, policy patterns count, MCP importability,
+  eco config validity). Human-readable output by default; `--json` for machine
+  consumption. Exit 0 if all pass/warn, exit 1 if any fail. Modeled after
+  `brew doctor` / `toolboxctl doctor`.
+
+### Tests
+- `TestDoctor`: 6 new tests (pass, json, no_db, check_names, schema_version,
+  exit_code).
+- Total: 1125 passed, 5 skipped.
+
 ## [0.17.1] — 2026-02-23
 
 ### Fixed

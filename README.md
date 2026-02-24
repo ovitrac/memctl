@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.17.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-1093%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-19%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.18.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1125%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-20%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -200,7 +200,10 @@ memctl <command> [options]
 | `chat --llm CMD` | Interactive memory-backed chat REPL |
 | `export [--tier T]` | Export memory items as JSONL to stdout |
 | `import [FILE]` | Import memory items from JSONL file or stdin |
+| `promote ID [--tier T]` | Promote item to higher tier (STM→MTM→LTM) |
 | `diff ID1 [ID2]` | Compare two items or item vs revision |
+| `reindex [--tokenizer P]` | Rebuild FTS5 index (optionally with new tokenizer) |
+| `doctor [--json]` | Environment health check (10 diagnostic checks) |
 | `serve [--transport T]` | Start MCP server (`stdio`/`streamable-http`/`sse`) |
 
 ### Global Flags
@@ -576,7 +579,7 @@ memctl chat --llm "claude -p" --source docs/ --session --store
 
 ## MCP Server
 
-memctl exposes 19 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
+memctl exposes 20 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
 
 ### Quick Install
 
@@ -718,6 +721,7 @@ bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 | `memory_status` | Project memory health dashboard | v0.14 |
 | `memory_diff` | Compare two items or item vs revision | v0.15 |
 | `memory_eco` | Toggle eco mode (on/off/status) | v0.16 |
+| `memory_promote` | Promote item to higher tier | v0.17 |
 
 Tool names use the `memory_*` prefix for drop-in compatibility with RAGIX.
 
@@ -827,16 +831,16 @@ memctl/
 ├── ask.py             One-shot folder Q&A orchestrator
 ├── query.py           FTS query normalization and intent classification
 ├── export_import.py   JSONL export/import with policy enforcement
-├── cli.py             17 CLI commands
+├── cli.py             21 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex + JSON stdin)
 └── mcp/
-    ├── tools.py       17 MCP tools (memory_* prefix)
+    ├── tools.py       20 MCP tools (memory_* prefix)
     ├── formatting.py  Injection block format (format_version=1)
     └── server.py      FastMCP server entry point
 ```
 
-23 source files. ~9,000 lines. Zero compiled dependencies for core.
+30 source files. ~12,800 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -996,7 +1000,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-1029 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, and memory reset.
+1125 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, and environment diagnostics.
 
 ---
 

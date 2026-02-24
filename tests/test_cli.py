@@ -1218,3 +1218,68 @@ class TestDiffCLI:
         r4 = run(["diff", item_id, "--latest", "--db", db, "-q"])
         assert r4.returncode == 0
         assert "original" in r4.stdout or "modified" in r4.stdout or "Diff:" in r4.stdout
+
+
+# ======================================================================
+# Doctor
+# ======================================================================
+
+
+class TestDoctor:
+    """Tests for memctl doctor — environment health check."""
+
+    def test_doctor_pass(self, populated_db):
+        """Healthy populated DB → all checks pass or warn → exit 0."""
+        r = run(["doctor", "--db", populated_db, "-q"])
+        assert r.returncode == 0
+
+    def test_doctor_json(self, populated_db):
+        """JSON output has 'status' + 'checks' array."""
+        r = run(["doctor", "--json", "--db", populated_db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert "status" in data
+        assert "checks" in data
+        assert isinstance(data["checks"], list)
+        assert data["status"] in ("ok", "warn")
+
+    def test_doctor_no_db(self, tmp_path):
+        """Nonexistent DB → warns but exit 0 (no fail)."""
+        fake_db = str(tmp_path / "nonexistent" / "memory.db")
+        r = run(["doctor", "--json", "--db", fake_db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["status"] in ("ok", "warn")
+        # db_exists should be warn
+        db_check = [c for c in data["checks"] if c["name"] == "db_exists"]
+        assert len(db_check) == 1
+        assert db_check[0]["status"] == "warn"
+
+    def test_doctor_check_names(self, populated_db):
+        """All 10 check names present in JSON output."""
+        r = run(["doctor", "--json", "--db", populated_db, "-q"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        names = {c["name"] for c in data["checks"]}
+        expected = {
+            "python_version", "sqlite3_module", "fts5_support",
+            "db_exists", "wal_mode", "schema_version",
+            "integrity_check", "policy_patterns", "mcp_server",
+            "eco_config",
+        }
+        assert names == expected
+
+    def test_doctor_schema_version(self, populated_db):
+        """Schema version check reports correct value."""
+        from memctl.store import SCHEMA_VERSION
+        r = run(["doctor", "--json", "--db", populated_db, "-q"])
+        data = json.loads(r.stdout)
+        sv = [c for c in data["checks"] if c["name"] == "schema_version"]
+        assert len(sv) == 1
+        assert sv[0]["status"] == "pass"
+        assert sv[0]["detail"] == str(SCHEMA_VERSION)
+
+    def test_doctor_exit_code(self, populated_db):
+        """Healthy environment → exit code 0."""
+        r = run(["doctor", "--db", populated_db, "-q"])
+        assert r.returncode == 0

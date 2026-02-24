@@ -21,6 +21,7 @@ Commands:
     memctl export [--tier T] [--type T]      — JSONL export → stdout
     memctl import [FILE] [--preserve-ids]    — JSONL import from file or stdin
     memctl reindex [--tokenizer PRESET]      — rebuild FTS5 index
+    memctl doctor [--json]                   — environment health check
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -1512,6 +1513,309 @@ def cmd_reset(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: doctor  (environment health check)
+# ===========================================================================
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    """Environment health check — verify installation, DB, and runtime."""
+    import sqlite3 as _sqlite3
+
+    json_mode = getattr(args, "json", False)
+    db_path = _resolve_db(args)
+    checks = []
+
+    # -- Check 1: Python version >= 3.10 -----------------------------------
+    py_ver = sys.version_info
+    if py_ver >= (3, 10):
+        checks.append({
+            "name": "python_version",
+            "status": "pass",
+            "detail": f"{py_ver.major}.{py_ver.minor}.{py_ver.micro}",
+            "message": f"Python {py_ver.major}.{py_ver.minor}.{py_ver.micro}",
+        })
+    else:
+        checks.append({
+            "name": "python_version",
+            "status": "fail",
+            "detail": f"{py_ver.major}.{py_ver.minor}.{py_ver.micro}",
+            "message": f"Python {py_ver.major}.{py_ver.minor} < 3.10 (unsupported)",
+        })
+
+    # -- Check 2: sqlite3 module available ---------------------------------
+    try:
+        _sqlite3.sqlite_version  # noqa: B018
+        checks.append({
+            "name": "sqlite3_module",
+            "status": "pass",
+            "detail": _sqlite3.sqlite_version,
+            "message": f"sqlite3 available (SQLite {_sqlite3.sqlite_version})",
+        })
+    except Exception as exc:
+        checks.append({
+            "name": "sqlite3_module",
+            "status": "fail",
+            "detail": str(exc),
+            "message": "sqlite3 module not available",
+        })
+
+    # -- Check 3: FTS5 support ---------------------------------------------
+    try:
+        probe = _sqlite3.connect(":memory:")
+        probe.execute(
+            "CREATE VIRTUAL TABLE _fts5_probe USING fts5(content)"
+        )
+        probe.close()
+        checks.append({
+            "name": "fts5_support",
+            "status": "pass",
+            "detail": "available",
+            "message": "FTS5 extension available",
+        })
+    except Exception:
+        checks.append({
+            "name": "fts5_support",
+            "status": "fail",
+            "detail": "not compiled",
+            "message": "FTS5 not available (rebuild SQLite with FTS5)",
+        })
+
+    # -- Check 4: DB exists ------------------------------------------------
+    db_exists = os.path.isfile(db_path)
+    if db_exists:
+        checks.append({
+            "name": "db_exists",
+            "status": "pass",
+            "detail": db_path,
+            "message": f"Database exists: {db_path}",
+        })
+    else:
+        checks.append({
+            "name": "db_exists",
+            "status": "warn",
+            "detail": db_path,
+            "message": f"Database not found: {db_path} (run memctl init)",
+        })
+
+    # -- Checks 5–7: DB-level (conditional on existence) -------------------
+    if db_exists:
+        try:
+            conn = _sqlite3.connect(db_path)
+
+            # Check 5: WAL mode
+            journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            if journal == "wal":
+                checks.append({
+                    "name": "wal_mode",
+                    "status": "pass",
+                    "detail": journal,
+                    "message": "WAL mode enabled",
+                })
+            else:
+                checks.append({
+                    "name": "wal_mode",
+                    "status": "warn",
+                    "detail": journal,
+                    "message": f"Journal mode is '{journal}' (expected 'wal')",
+                })
+
+            # Check 6: Schema version
+            from memctl.store import SCHEMA_VERSION
+            try:
+                row = conn.execute(
+                    "SELECT value FROM schema_meta WHERE key='schema_version'"
+                ).fetchone()
+                if row:
+                    db_ver = int(row[0])
+                    if db_ver == SCHEMA_VERSION:
+                        checks.append({
+                            "name": "schema_version",
+                            "status": "pass",
+                            "detail": str(db_ver),
+                            "message": f"Schema version {db_ver} (matches expected)",
+                        })
+                    elif db_ver > SCHEMA_VERSION:
+                        checks.append({
+                            "name": "schema_version",
+                            "status": "warn",
+                            "detail": str(db_ver),
+                            "message": (
+                                f"Schema version {db_ver} > expected {SCHEMA_VERSION}"
+                                " (newer DB?)"
+                            ),
+                        })
+                    else:
+                        checks.append({
+                            "name": "schema_version",
+                            "status": "fail",
+                            "detail": str(db_ver),
+                            "message": (
+                                f"Schema version {db_ver} < expected {SCHEMA_VERSION}"
+                                " (migration needed)"
+                            ),
+                        })
+                else:
+                    checks.append({
+                        "name": "schema_version",
+                        "status": "fail",
+                        "detail": "missing",
+                        "message": "schema_version key not found in schema_meta",
+                    })
+            except _sqlite3.OperationalError:
+                checks.append({
+                    "name": "schema_version",
+                    "status": "fail",
+                    "detail": "no schema_meta table",
+                    "message": "schema_meta table missing (corrupt or foreign DB)",
+                })
+
+            # Check 7: Integrity check
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            if integrity == "ok":
+                checks.append({
+                    "name": "integrity_check",
+                    "status": "pass",
+                    "detail": "ok",
+                    "message": "Database integrity check passed",
+                })
+            else:
+                checks.append({
+                    "name": "integrity_check",
+                    "status": "fail",
+                    "detail": integrity[:200],
+                    "message": "Database corruption detected",
+                })
+
+            conn.close()
+        except _sqlite3.Error as exc:
+            # If we can't even open the DB, report failures for 5–7
+            for name in ("wal_mode", "schema_version", "integrity_check"):
+                checks.append({
+                    "name": name,
+                    "status": "fail",
+                    "detail": str(exc),
+                    "message": f"Cannot read database: {exc}",
+                })
+    else:
+        # DB doesn't exist — skip checks 5–7 with warn
+        for name in ("wal_mode", "schema_version", "integrity_check"):
+            checks.append({
+                "name": name,
+                "status": "warn",
+                "detail": "skipped",
+                "message": "Skipped (no database)",
+            })
+
+    # -- Check 8: Policy patterns count ------------------------------------
+    from memctl.policy import (
+        _SECRET_PATTERNS,
+        _INJECTION_PATTERNS,
+        _INSTRUCTIONAL_BLOCK_PATTERNS,
+        _INSTRUCTIONAL_QUARANTINE_PATTERNS,
+        _PII_PATTERNS,
+    )
+    total_patterns = (
+        len(_SECRET_PATTERNS)
+        + len(_INJECTION_PATTERNS)
+        + len(_INSTRUCTIONAL_BLOCK_PATTERNS)
+        + len(_INSTRUCTIONAL_QUARANTINE_PATTERNS)
+        + len(_PII_PATTERNS)
+    )
+    expected_patterns = 35
+    if total_patterns == expected_patterns:
+        checks.append({
+            "name": "policy_patterns",
+            "status": "pass",
+            "detail": str(total_patterns),
+            "message": f"Policy engine: {total_patterns} detection patterns loaded",
+        })
+    else:
+        checks.append({
+            "name": "policy_patterns",
+            "status": "fail",
+            "detail": str(total_patterns),
+            "message": (
+                f"Policy patterns: {total_patterns} loaded,"
+                f" expected {expected_patterns}"
+            ),
+        })
+
+    # -- Check 9: MCP server importable ------------------------------------
+    try:
+        import mcp  # noqa: F401
+        checks.append({
+            "name": "mcp_server",
+            "status": "pass",
+            "detail": "importable",
+            "message": "MCP server dependencies available",
+        })
+    except ImportError:
+        checks.append({
+            "name": "mcp_server",
+            "status": "warn",
+            "detail": "not installed",
+            "message": "MCP not installed (optional: pip install memctl[mcp])",
+        })
+
+    # -- Check 10: Eco config ----------------------------------------------
+    from pathlib import Path as _Path
+    eco_config = _Path(".claude/eco/config.json")
+    if eco_config.exists():
+        try:
+            import json as _json
+            with open(eco_config, "r", encoding="utf-8") as f:
+                _json.load(f)
+            checks.append({
+                "name": "eco_config",
+                "status": "pass",
+                "detail": str(eco_config),
+                "message": "Eco config valid",
+            })
+        except (ValueError, OSError):
+            checks.append({
+                "name": "eco_config",
+                "status": "fail",
+                "detail": str(eco_config),
+                "message": "Eco config exists but is invalid JSON",
+            })
+    else:
+        checks.append({
+            "name": "eco_config",
+            "status": "warn",
+            "detail": "not installed",
+            "message": "Eco mode not configured (optional)",
+        })
+
+    # -- Aggregate status --------------------------------------------------
+    statuses = [c["status"] for c in checks]
+    if "fail" in statuses:
+        overall = "fail"
+    elif "warn" in statuses:
+        overall = "warn"
+    else:
+        overall = "ok"
+
+    # -- Output ------------------------------------------------------------
+    if json_mode:
+        import json as _json_out
+        print(_json_out.dumps({"status": overall, "checks": checks}, indent=2))
+    else:
+        for c in checks:
+            tag = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}[c["status"]]
+            _info(f"[{tag}] {c['message']}")
+        _info("")
+        if overall == "ok":
+            _info("All checks passed.")
+        elif overall == "warn":
+            _info("Some warnings — memctl is functional.")
+        else:
+            _info("Failures detected — see above.")
+
+    if overall == "fail":
+        sys.exit(1)
+
+
+# ===========================================================================
 # Command: scripts-path  (print bundled scripts location)
 # ===========================================================================
 
@@ -2051,6 +2355,13 @@ def main() -> None:
         help="Also clear mount registrations (default: preserve)",
     )
     p_reset.set_defaults(func=cmd_reset)
+
+    # -- doctor ------------------------------------------------------------
+    p_doctor = sub.add_parser(
+        "doctor", parents=[_common],
+        help="Environment health check",
+    )
+    p_doctor.set_defaults(func=cmd_doctor)
 
     # -- scripts-path ------------------------------------------------------
 
