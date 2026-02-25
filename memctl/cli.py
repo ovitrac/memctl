@@ -267,6 +267,11 @@ def cmd_push(args: argparse.Namespace) -> None:
             f"{total.files_processed} file(s) "
             f"({total.files_skipped} skipped)"
         )
+        if total.chunks_created > 0:
+            _info(
+                "[push] Next: memctl search <keywords>  or  "
+                "/recall <keywords>"
+            )
 
     # --- Phase 2: Recall via FTS5 ---
     items = store.search_fulltext(

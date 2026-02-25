@@ -85,12 +85,13 @@ except Exception:
 " "$ECO_CONFIG" 2>/dev/null)
 fi
 
-# Check DB exists
+# Check DB exists — if no DB, nudge toward ingestion
 if [ ! -f "$DB_PATH" ]; then
+    printf '[eco] No memory database. Ingest first: memctl push "description" --source /path/ or /scan /path/\n' >&2
     exit 0
 fi
 
-# Count indexed items — only nudge for substantial stores
+# Count indexed items
 ITEM_COUNT=$(python3 -c "
 import sqlite3, sys
 try:
@@ -101,6 +102,14 @@ except Exception:
     print(0)
 " "$DB_PATH" 2>/dev/null)
 
+# Cold start: memory exists but is nearly empty — strong nudge toward push
+if [ "${ITEM_COUNT:-0}" -lt 10 ]; then
+    printf '[eco] Memory nearly empty (%s items). Ingest first: memctl push "description" --source /path/ or /scan /path/\n' \
+        "${ITEM_COUNT:-0}" >&2
+    exit 0
+fi
+
+# Small stores (< 200 items): no nudge for search tools — not enough data to justify
 if [ "${ITEM_COUNT:-0}" -lt 200 ]; then
     exit 0
 fi

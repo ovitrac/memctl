@@ -4,6 +4,37 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.1] — 2026-02-25
+
+### Fixed (Cold-start discipline — field report feedback)
+
+- **eco-hint.sh 4-way branch.** The `UserPromptSubmit` hook now has a
+  cold-start branch: when eco is ON and item count < 10, injects explicit
+  guidance to run `memctl push --source` or `/scan` before exploring.
+  Previously, a nearly-empty DB produced the same hint as a populated one,
+  giving no indication that ingestion was the first step. The populated
+  branch (>= 10 items) now includes Level 0 in its escalation ladder.
+  Files: `memctl/templates/eco/eco-hint.sh`, `extras/eco/eco-hint.sh`.
+
+- **eco-nudge.sh cold-start nudge.** The `PreToolUse` hook now emits a
+  strong nudge toward `memctl push` when the DB is empty or nearly empty
+  (< 10 items), instead of silently exiting. When no DB exists at all,
+  emits the same ingestion guidance. The >= 200 item threshold for search
+  tool nudges is unchanged.
+  File: `memctl/templates/hooks/eco-nudge.sh`.
+
+- **Level 0 in escalation ladder.** ECO.md now starts the ladder at
+  Level 0 (Ingest) with explicit prohibition against `find`/`ls`/`Grep`/
+  `Glob` on un-indexed codebases. Level 0 applies only on cold start
+  (new codebase or directory not yet indexed).
+  Files: `memctl/templates/eco/ECO.md`, `extras/eco/ECO.md`.
+
+- **Post-ingest search hint.** `memctl push` now emits a stderr hint
+  after successful ingestion: `Next: memctl search <keywords> or /recall
+  <keywords>`. Closes the cold-start loop — users know what to do after
+  ingestion completes.
+  File: `memctl/cli.py`.
+
 ## [0.19.0] — 2026-02-25
 
 ### Added

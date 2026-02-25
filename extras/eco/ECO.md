@@ -84,10 +84,15 @@ Very long questions (> 400 chars) → budget 1500.
 
 Always apply in this order before native fallback:
 
+0. **Ingest** — `memctl push "description" --source /path/` or `/scan /path/` (cold start: new codebase or directory not yet indexed)
 1. **`memory_inspect`** — structural overview (file tree, extensions, sizes, observations)
 2. **`memory_recall`** — selective content retrieval (FTS5, token-budgeted, scoped)
 3. **`memory_loop --protocol json`** — iterative refinement (bounded, convergence-detecting)
 4. **Native `Read`/`View`** — only if raw content is required for editing or line-level precision
+
+Level 0 applies when facing a directory that has not been ingested yet.
+Do NOT explore an un-indexed codebase with `find`, `ls`, `Grep`, or `Glob`.
+Ingest first, then use memory tools.
 
 Native file reads are a last resort for editing or line-level precision.
 
