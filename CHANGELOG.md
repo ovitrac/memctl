@@ -4,6 +4,23 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.0] — 2026-02-25
+
+### Added
+
+- **`memory_recall_best_effort` MCP tool (21st tool).** Multi-step best-effort
+  retrieval with full cascade transparency. Adds an outer retry loop on top of
+  `store.search_fulltext`, with normalization reporting (`query_used`), cascade
+  trace (`steps[]`), query reformulation on zero results (identifier extraction,
+  broadest-term fallback), and two suggested queries in zero-result hints.
+  Tool description embeds query discipline, answer contract, and escalation
+  guidance at MCP schema level (attention level 2).
+  - New parameters: `max_steps` (1-5, default 3), `mode` ("auto"/"strict").
+  - New response fields: `query_used`, `strategy_used`, `steps[]`, `hint`.
+  - Classified as read tool in rate limiter.
+  - Helper functions: `_extract_best_retry_query`, `_suggest_next_queries`.
+  Files: `memctl/mcp/tools.py`, `memctl/mcp/rate_limiter.py`.
+
 ## [0.18.3] — 2026-02-25
 
 ### Fixed

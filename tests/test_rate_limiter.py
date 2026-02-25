@@ -68,8 +68,9 @@ class TestToolClassification:
 
     def test_read_tools_membership(self):
         expected = {
-            "memory_recall", "memory_search", "memory_read",
-            "memory_export", "memory_inspect", "memory_ask", "memory_loop",
+            "memory_recall", "memory_recall_best_effort", "memory_search",
+            "memory_read", "memory_export", "memory_inspect", "memory_ask",
+            "memory_loop",
         }
         assert READ_TOOLS == expected
 

@@ -1,5 +1,5 @@
 """
-memctl MCP Tools — 20 memory tools for MCP integration.
+memctl MCP Tools — 21 memory tools for MCP integration.
 
 Thin wrappers around MemoryStore, MemoryPolicy, and module-level functions.
 Each tool follows the locked middleware order:
@@ -12,6 +12,7 @@ Each tool follows the locked middleware order:
 
 Tool hierarchy:
     PRIMARY:    memory_recall    — token-budgeted injection (canonical contract)
+                memory_recall_best_effort — coached multi-step retrieval with cascade trace
     SECONDARY:  memory_search    — interactive discovery
     WRITE:      memory_propose   — governed write, memory_write — privileged
     CRUD:       memory_read      — read by IDs
@@ -62,7 +63,7 @@ def register_memory_tools(
     audit=None,
 ) -> None:
     """
-    Register all 20 memory MCP tools on a FastMCP server instance.
+    Register all 21 memory MCP tools on a FastMCP server instance.
 
     Args:
         mcp: FastMCP server instance.
@@ -223,6 +224,219 @@ def register_memory_tools(
             return {"status": "error", "message": f"Recall failed: {e}"}
         finally:
             audit.log("memory_recall", rid, session_id, _audit_db,
+                      outcome, detail, (time.monotonic() - t0) * 1000)
+
+    # =====================================================================
+    # PRIMARY: Best-effort retrieval with cascade trace
+    # =====================================================================
+
+    @mcp.tool()
+    def memory_recall_best_effort(
+        query: str,
+        budget_tokens: int = 1500,
+        tier: Optional[str] = None,
+        scope: Optional[str] = None,
+        max_steps: int = 3,
+        mode: str = "auto",
+    ) -> Dict[str, Any]:
+        """Multi-step best-effort memory retrieval with full cascade transparency.
+
+        Use this tool for **exploratory recall** when you need prior knowledge
+        from the memory store and want full visibility into what happened.
+
+        Query discipline (effectiveness by query type):
+            identifiers (CamelCase, snake_case, UPPER_CASE) → ~100% recall
+            domain term pairs (e.g. "auth middleware")       → ~90% recall
+            natural language 2-3 keywords                    → 60-80% recall
+            full sentences                                   → ~40% recall
+
+        When to use which tool:
+            memory_recall_best_effort → exploration, coached multi-step retrieval
+            memory_recall             → programmatic injection (stable contract)
+            Grep / Glob               → after a miss, for direct file search
+
+        Answer contract for consumers of the returned context:
+            1. Retrieved — cite sources from inject_text (tier, provenance)
+            2. Analysis  — your reasoning on top of retrieved context
+
+        Zero-result guidance: check query_used vs your raw query. Try
+        identifiers or base forms. Use memory_inspect to verify indexed scope.
+        Use memory_reindex if content was added after last index.
+
+        Args:
+            query: Natural language or identifier search query.
+            budget_tokens: Maximum tokens for injection block (default 1500).
+            tier: Filter by tier (stm|mtm|ltm). None = all.
+            scope: Filter by scope. None = all.
+            max_steps: Maximum retrieval attempts (1-5, default 3).
+            mode: "auto" (default), "strict" (single-pass, no retry).
+
+        Returns:
+            status: "ok" or "error".
+            inject_text: Formatted injection block (format_version=1).
+            items: Structured item list.
+            tokens_used: Actual tokens consumed.
+            matched: Total items matching query.
+            format_version: Injection format version.
+            query_used: Normalized query actually sent to FTS.
+            strategy_used: Final FTS strategy (AND/REDUCED_AND/OR_FALLBACK/LIKE).
+            steps: List of step dicts [{step, action, query, strategy, hits}].
+            hint: Guidance text (present on zero results or query coaching).
+        """
+        t0 = time.monotonic()
+        rid = audit.new_rid()
+        session_id = _sid()
+        outcome = "ok"
+        detail: Dict[str, Any] = {}
+        try:
+            # ③ Rate limiter (read)
+            if rate_limiter:
+                rate_limiter.check_read(session_id)
+
+            # Clamp max_steps to [1, 5]
+            effective_max_steps = max(1, min(5, max_steps))
+            if mode == "strict":
+                effective_max_steps = 1
+
+            steps: List[Dict[str, Any]] = []
+            raw_items: List[MemoryItem] = []
+            final_query = query
+            final_meta = None
+
+            # -- Step 1: NORMALIZE --
+            from memctl.query import _is_identifier
+            normalized = normalize_query(query)
+            norm_changed = normalized != query
+            steps.append({
+                "step": 1,
+                "action": "normalize",
+                "query_in": query,
+                "query_out": normalized,
+                "changed": norm_changed,
+            })
+
+            # -- Step 2: SEARCH with normalized query --
+            raw_items = store.search_fulltext(
+                normalized, tier=tier, scope=scope, limit=50,
+            )
+            meta = store._last_search_meta
+            final_meta = meta
+            final_query = normalized
+
+            steps.append({
+                "step": 2,
+                "action": "search",
+                "query": normalized,
+                "strategy": meta.strategy if meta else "unknown",
+                "hits": len(raw_items),
+            })
+
+            # -- Step 3: RETRY with identifiers (if 0 results) --
+            step_num = 3
+            if not raw_items and step_num <= effective_max_steps:
+                retry_q = _extract_best_retry_query(query, normalized)
+                if retry_q and retry_q != normalized:
+                    raw_items = store.search_fulltext(
+                        retry_q, tier=tier, scope=scope, limit=50,
+                    )
+                    meta = store._last_search_meta
+                    if raw_items:
+                        final_meta = meta
+                        final_query = retry_q
+                    steps.append({
+                        "step": step_num,
+                        "action": "retry_identifiers",
+                        "query": retry_q,
+                        "strategy": meta.strategy if meta else "unknown",
+                        "hits": len(raw_items),
+                    })
+
+            # -- Step 4: RETRY with broadest single term (if still 0) --
+            step_num = 4
+            if not raw_items and step_num <= effective_max_steps:
+                words = query.strip().split()
+                longest = max(words, key=len) if words else ""
+                if longest and longest != normalized and longest != final_query:
+                    raw_items = store.search_fulltext(
+                        longest, tier=tier, scope=scope, limit=50,
+                    )
+                    meta = store._last_search_meta
+                    if raw_items:
+                        final_meta = meta
+                        final_query = longest
+                    steps.append({
+                        "step": step_num,
+                        "action": "retry_broadest",
+                        "query": longest,
+                        "strategy": meta.strategy if meta else "unknown",
+                        "hits": len(raw_items),
+                    })
+
+            # Filter non-injectable items
+            injectable = [it for it in raw_items if it.injectable]
+
+            # Build dicts for formatting
+            enriched = [_item_to_format_dict(it) for it in injectable]
+
+            inject_text = format_injection_block(
+                enriched,
+                budget_tokens=budget_tokens,
+                total_matched=len(enriched),
+                injection_type="memory_recall",
+                fts_strategy=final_meta.strategy if final_meta else None,
+                fts_dropped_terms=final_meta.dropped_terms if final_meta else None,
+            )
+
+            catalog = format_search_results(enriched, query=query)
+            tokens_used = len(inject_text) // 4 if inject_text else 0
+
+            detail = {
+                "query_len": len(query), "matched": len(enriched),
+                "tokens": tokens_used, "steps": len(steps),
+            }
+
+            result: Dict[str, Any] = {
+                "status": "ok",
+                "inject_text": inject_text,
+                "items": catalog,
+                "tokens_used": tokens_used,
+                "matched": len(enriched),
+                "format_version": FORMAT_VERSION,
+                "query_used": final_query,
+                "strategy_used": final_meta.strategy if final_meta else "unknown",
+                "steps": steps,
+            }
+
+            # Zero-result hint with two suggestions
+            if not enriched:
+                suggestions = _suggest_next_queries(query, normalized, final_meta)
+                strategy_note = ""
+                if final_meta and final_meta.strategy != "AND":
+                    strategy_note = (
+                        f" (cascade reached: {final_meta.strategy})"
+                    )
+                result["hint"] = (
+                    f"No results after {len(steps)} steps{strategy_note}. "
+                    "Suggestions:\n"
+                    + "\n".join(f"  {i+1}. {s}" for i, s in enumerate(suggestions))
+                    + "\nAlso try: memory_inspect to verify indexed scope, "
+                    "memory_reindex if content was added recently."
+                )
+
+            # Morphological hint when results exist but may miss variants
+            if final_meta and final_meta.morphological_hint and "hint" not in result:
+                result["hint"] = final_meta.morphological_hint
+
+            return result
+
+        except RateLimitExceeded as e:
+            outcome = "rate_limited"
+            return {"status": "rate_limited", "retry_after_ms": e.retry_after_ms, "message": str(e)}
+        except Exception as e:
+            outcome = "error"
+            return {"status": "error", "message": f"Recall best-effort failed: {e}"}
+        finally:
+            audit.log("memory_recall_best_effort", rid, session_id, _audit_db,
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
     # =====================================================================
@@ -1793,7 +2007,7 @@ def register_memory_tools(
                       outcome, detail, (time.monotonic() - t0) * 1000)
 
     # -- Log registered tool count -----------------------------------------
-    logger.info("Registered 20 memory MCP tools (with L0/L1 middleware)")
+    logger.info("Registered 21 memory MCP tools (with L0/L1 middleware)")
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -1839,3 +2053,73 @@ def _maybe_auto_consolidate(
     )
     pipeline = ConsolidationPipeline(store, cfg)
     return pipeline.run(scope=scope)
+
+
+def _extract_best_retry_query(raw: str, normalized: str) -> Optional[str]:
+    """Extract the best retry query from identifiers or longest term.
+
+    Priority: identifiers in raw query, then longest non-stop word.
+    Returns None if no useful retry query can be formed.
+    """
+    from memctl.query import _is_identifier
+
+    words = raw.strip().split()
+    # Try identifiers first
+    identifiers = [w for w in words if _is_identifier(w)]
+    if identifiers:
+        return " ".join(identifiers)
+
+    # Fall back to longest word from normalized query
+    norm_words = normalized.strip().split()
+    if norm_words:
+        longest = max(norm_words, key=len)
+        if len(longest) >= 3:
+            return longest
+
+    return None
+
+
+def _suggest_next_queries(
+    raw: str,
+    normalized: str,
+    meta: Optional[Any],
+) -> List[str]:
+    """Generate exactly 2 query suggestions for zero-result guidance.
+
+    Returns:
+        List of 2 suggestion strings.
+    """
+    from memctl.query import _is_identifier
+
+    suggestions: List[str] = []
+
+    # Suggestion 1: identifier-based
+    words = raw.strip().split()
+    identifiers = [w for w in words if _is_identifier(w)]
+    if identifiers:
+        suggestions.append(
+            f"Try identifier query: '{' '.join(identifiers)}'"
+        )
+    else:
+        suggestions.append(
+            "Use identifiers (CamelCase, snake_case) instead of descriptions"
+        )
+
+    # Suggestion 2: base form / shortest meaningful terms
+    norm_words = normalized.strip().split()
+    if len(norm_words) > 1:
+        # Keep only the two longest terms
+        by_len = sorted(norm_words, key=len, reverse=True)[:2]
+        suggestions.append(
+            f"Try shorter query: '{' '.join(by_len)}'"
+        )
+    elif norm_words:
+        suggestions.append(
+            f"Try single term: '{norm_words[0]}'"
+        )
+    else:
+        suggestions.append(
+            "Remove articles and prepositions, keep domain terms"
+        )
+
+    return suggestions[:2]

@@ -1,5 +1,5 @@
 """
-Tests for all 19 MCP tools in memctl.mcp.tools.
+Tests for all 21 MCP tools in memctl.mcp.tools.
 
 Tests use direct function calls (not MCP protocol) via a mock FastMCP.
 memory_ask and memory_loop tests are marked with skipif since they
@@ -70,14 +70,15 @@ def call(env, tool_name, **kwargs):
 
 
 class TestToolCount:
-    def test_d20_20_tools_registered(self, mcp_env):
-        """D20: 20 tools registered."""
-        assert len(mcp_env["mcp"].tools) == 20
+    def test_d20_21_tools_registered(self, mcp_env):
+        """D20: 21 tools registered."""
+        assert len(mcp_env["mcp"].tools) == 21
 
     def test_d21_all_tool_names(self, mcp_env):
-        """D21: memory_promote in expected set."""
+        """D21: all 21 tool names in expected set."""
         expected = {
-            "memory_recall", "memory_search", "memory_propose", "memory_write",
+            "memory_recall", "memory_recall_best_effort",
+            "memory_search", "memory_propose", "memory_write",
             "memory_read", "memory_stats", "memory_status", "memory_consolidate",
             "memory_diff", "memory_eco", "memory_promote",
             "memory_mount", "memory_sync", "memory_inspect",
@@ -110,6 +111,84 @@ class TestMemoryRecall:
         result = call(mcp_env, "memory_recall", query="microservices")
         assert result["status"] == "ok"
         assert result["matched"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# memory_recall_best_effort
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryRecallBestEffort:
+    def test_best_effort_empty_store(self, mcp_env):
+        """Empty store returns ok with 0 matched and steps trace."""
+        result = call(mcp_env, "memory_recall_best_effort", query="test")
+        assert result["status"] == "ok"
+        assert result["matched"] == 0
+        assert "steps" in result
+        assert isinstance(result["steps"], list)
+        assert len(result["steps"]) >= 1  # at least normalize + search
+        assert "query_used" in result
+        assert "strategy_used" in result
+
+    def test_best_effort_with_items(self, mcp_env):
+        """Retrieves items and reports cascade trace."""
+        store = mcp_env["store"]
+        item = MemoryItem(
+            title="Architecture Guide",
+            content="We use microservices for scalability",
+            tags=["architecture"],
+        )
+        store.write_item(item, reason="test")
+
+        result = call(mcp_env, "memory_recall_best_effort",
+                       query="microservices")
+        assert result["status"] == "ok"
+        assert result["matched"] >= 1
+        assert result["query_used"] == "microservices"
+        assert result["format_version"] == 1
+        assert len(result["steps"]) >= 2
+
+    def test_best_effort_normalizes_long_query(self, mcp_env):
+        """Long NL query is normalized and query_used reflects it."""
+        store = mcp_env["store"]
+        item = MemoryItem(
+            title="Database design",
+            content="PostgreSQL for main storage backend",
+            tags=["database"],
+        )
+        store.write_item(item, reason="test")
+
+        result = call(mcp_env, "memory_recall_best_effort",
+                       query="how does the PostgreSQL database work")
+        assert result["status"] == "ok"
+        # query_used should be normalized (stop words stripped)
+        assert result["query_used"] != "how does the PostgreSQL database work"
+        # Normalize step should show changed=True
+        norm_step = result["steps"][0]
+        assert norm_step["action"] == "normalize"
+        assert norm_step["changed"] is True
+
+    def test_best_effort_max_steps_clamped(self, mcp_env):
+        """max_steps is clamped to [1, 5]."""
+        result = call(mcp_env, "memory_recall_best_effort",
+                       query="test", max_steps=100)
+        assert result["status"] == "ok"
+        # Even with max_steps=100, steps should not exceed 5
+        assert len(result["steps"]) <= 5
+
+    def test_best_effort_format_version(self, mcp_env):
+        """format_version is present and equals FORMAT_VERSION."""
+        result = call(mcp_env, "memory_recall_best_effort", query="test")
+        assert "format_version" in result
+        assert result["format_version"] == 1
+
+    def test_best_effort_strict_mode(self, mcp_env):
+        """mode='strict' limits to single-pass search (no retry)."""
+        result = call(mcp_env, "memory_recall_best_effort",
+                       query="nonexistent_content_xyz", mode="strict")
+        assert result["status"] == "ok"
+        # In strict mode, max 2 steps: normalize + search (no retry)
+        assert len(result["steps"]) <= 2
 
 
 # ---------------------------------------------------------------------------

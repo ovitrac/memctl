@@ -9,8 +9,9 @@ No threading locks — FastMCP is async single-threaded.
 Accounting definitions (locked):
     write:   memory_write, memory_propose, memory_import,
              memory_consolidate, memory_sync
-    read:    memory_recall, memory_search, memory_read,
-             memory_export, memory_inspect, memory_ask, memory_loop
+    read:    memory_recall, memory_recall_best_effort, memory_search,
+             memory_read, memory_export, memory_inspect, memory_ask,
+             memory_loop
     exempt:  memory_stats, memory_mount (metadata only)
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
@@ -28,8 +29,9 @@ WRITE_TOOLS: Set[str] = {
     "memory_consolidate", "memory_sync", "memory_reindex",
 }
 READ_TOOLS: Set[str] = {
-    "memory_recall", "memory_search", "memory_read",
-    "memory_export", "memory_inspect", "memory_ask", "memory_loop",
+    "memory_recall", "memory_recall_best_effort", "memory_search",
+    "memory_read", "memory_export", "memory_inspect", "memory_ask",
+    "memory_loop",
 }
 EXEMPT_TOOLS: Set[str] = {
     "memory_stats", "memory_mount",

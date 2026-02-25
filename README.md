@@ -11,9 +11,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.18.3-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-1126%20passing-brightgreen.svg)](./tests)
-[![MCP](https://img.shields.io/badge/MCP-20%20tools-blueviolet.svg)](#mcp-server)
+[![Version](https://img.shields.io/badge/version-0.19.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1132%20passing-brightgreen.svg)](./tests)
+[![MCP](https://img.shields.io/badge/MCP-21%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -703,6 +703,7 @@ bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
 | Tool | Description | Since |
 |------|-------------|-------|
 | `memory_recall` | Token-budgeted context injection (primary tool) | v0.1 |
+| `memory_recall_best_effort` | Multi-step coached retrieval with cascade trace | v0.19 |
 | `memory_search` | Interactive FTS5 discovery | v0.1 |
 | `memory_propose` | Store findings with policy governance | v0.1 |
 | `memory_write` | Direct write (privileged/dev, policy-checked) | v0.1 |
@@ -1002,7 +1003,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-1126 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, and environment diagnostics.
+1132 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, and environment diagnostics.
 
 ---
 
