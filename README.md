@@ -11,7 +11,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.18.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Version](https://img.shields.io/badge/version-0.18.2-orange.svg)](https://github.com/ovitrac/memctl/releases)
 [![Tests](https://img.shields.io/badge/tests-1126%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-20%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
@@ -769,18 +769,20 @@ memctl eco on    # Enable eco mode (required)
 
 This sets up:
 - MCP server with project-scoped memory (`.memory/memory.db`)
-- Hook that reminds Claude to prefer `memory_inspect` and `memory_recall` (~50 tokens/turn)
-- Strategy file (`.claude/eco/ECO.md`) with the escalation ladder + FTS5 query discipline
-- `/eco` slash command for live toggle (`/eco on`, `/eco off`, `/eco status`)
+- **eco-hint hook** (`UserPromptSubmit`) — injects scale-aware context with item count, escalation ladder, and Retrieved/Analysis answer contract (~80 tokens/turn)
+- **eco-nudge hook** (`PreToolUse`, v0.18.2) — contextual reminder before Grep/Glob on indexed projects (>=200 items, exploration patterns only, never blocks)
+- Strategy file (`.claude/eco/ECO.md`) with FTS5 query discipline
+- Slash commands: `/eco`, `/scan`, `/recall`, `/remember`, `/reindex`, `/forget`, `/consolidate`, `/status`, `/export`, `/diff`
 
-**The escalation ladder:**
+**The escalation ladder** (embedded in the hint since v0.18.2):
 
 1. `memory_inspect` — structural overview (file tree, sizes, observations)
-2. `memory_recall` — selective content retrieval (FTS5, token-budgeted)
-3. `memory_loop` — iterative refinement (bounded, convergence-detecting)
-4. Native `Read`/`View` — last resort for editing or line-level precision
+2. `memory_recall` or `/recall <keywords>` — selective content retrieval (FTS5, token-budgeted, 2-3 identifiers)
+3. Native `Grep`/`Glob` — only after recall returns 0 results despite query refinement
+4. Native `Read`/`View` — for editing or line-level precision on a specific known file
 
 eco mode is advisory for retrieval, not restrictive for editing.
+Bypass eco for: editing files, reading a single known small file, git operations.
 
 **Query normalization (v0.10):** Stop words (French + English articles, prepositions,
 question words) are stripped automatically before FTS search. Code identifiers

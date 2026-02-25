@@ -323,6 +323,67 @@ print(f'  Hook registered in {settings_path}')
 fi
 
 # ---------------------------------------------------------------------------
+# Step 3b: Install eco-nudge hook (PreToolUse for search tools)
+# ---------------------------------------------------------------------------
+
+info "Step 3b: Installing eco-nudge hook"
+
+NUDGE_TEMPLATE="${SCRIPT_DIR}/../templates/hooks/eco-nudge.sh"
+NUDGE_FILE="${HOOKS_DIR}/eco-nudge.sh"
+
+if [[ ! -f "$NUDGE_TEMPLATE" ]]; then
+    warn "eco-nudge template not found: $NUDGE_TEMPLATE"
+    warn "Skipping PreToolUse hook (search tool guidance will not be active)"
+else
+    if [[ "$DRY_RUN" == "true" ]]; then
+        info "[dry-run] Would install: $NUDGE_FILE"
+        info "[dry-run] Would register PreToolUse hook in $SETTINGS_FILE"
+    else
+        if [[ -f "$NUDGE_FILE" && "$FORCE" == "false" ]]; then
+            backup_file "$NUDGE_FILE"
+        fi
+
+        cp "$NUDGE_TEMPLATE" "$NUDGE_FILE"
+        chmod +x "$NUDGE_FILE"
+        ok "Nudge hook installed: $NUDGE_FILE"
+
+        # Register PreToolUse hook in settings
+        "$PYTHON_CMD" -c "
+import json, os, sys
+
+settings_path = sys.argv[1]
+hook_path = sys.argv[2]
+
+if os.path.exists(settings_path):
+    with open(settings_path, 'r', encoding='utf-8') as f:
+        try:
+            config = json.load(f)
+        except json.JSONDecodeError:
+            config = {}
+else:
+    config = {}
+
+if 'hooks' not in config:
+    config['hooks'] = {}
+
+hooks_list = config['hooks'].get('PreToolUse', [])
+nudge_entry = {'hooks': [{'type': 'command', 'command': hook_path}]}
+# Remove previous eco-nudge entries (idempotent)
+hooks_list = [e for e in hooks_list
+              if 'eco-nudge' not in json.dumps(e)]
+hooks_list.append(nudge_entry)
+config['hooks']['PreToolUse'] = hooks_list
+
+with open(settings_path, 'w', encoding='utf-8') as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+
+print(f'  PreToolUse hook registered in {settings_path}')
+" "$SETTINGS_FILE" "$NUDGE_FILE"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Step 4: Install ECO.md strategy file
 # ---------------------------------------------------------------------------
 

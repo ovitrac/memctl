@@ -265,11 +265,13 @@ eco rewards precision. The cascade catches the misses — but identifiers still 
 ## Bypass Decision Tree
 
 ```
-Is the task about a SPECIFIC FILE you already know the path to?
-  → YES: Bypass eco. Use native Read.
+Is the task about EDITING or MODIFYING a specific file?
+  → YES: Use eco to LOCATE (memory_inspect + memory_recall).
+         Use native Read to get current content. Use native Edit to modify.
 
-Is the task about EDITING or MODIFYING code?
-  → YES: Use eco to LOCATE. Use native to EDIT.
+Is the task about EXPLORING or UNDERSTANDING a file's role?
+  → YES: Use memory_recall scoped to the file's directory.
+         Do NOT bypass eco just because you know the file path.
 
 Is the task about UNDERSTANDING structure or traceability?
   → YES: Use eco (inspect + recall).
@@ -278,6 +280,11 @@ Is the query in natural language (> 5 words)?
   → YES: Stop words are stripped automatically.
          If still 0 results, extract 2-3 identifiers. Then recall.
 ```
+
+**Note:** Knowing a file path does NOT justify bypassing eco for exploration.
+Developers often "know the path" after a Grep hit and immediately Read the file
+instead of using `memory_recall` to understand the module in context. This
+collapses exploration into sequential native reads within 1-2 turns.
 
 ---
 

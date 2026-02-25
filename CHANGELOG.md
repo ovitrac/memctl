@@ -4,6 +4,61 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.2] — 2026-02-25
+
+### Changed (Eco Compliance — behavioral review)
+
+- **eco-hint.sh rewrite (F-M1).** The `UserPromptSubmit` hook now injects
+  situational, scale-aware context instead of generic advisory text.
+  Changes: item count from DB ("1247 indexed items"), embedded 4-step
+  escalation ladder (inspect → recall → Grep → Read), "when eco wins"
+  bullets (cross-file, binary formats, persistence), clear bypass rules
+  (editing, single known file, git), Retrieved/Analysis answer contract.
+  No ECO.md dependency on the hot path.
+  Files: `memctl/templates/eco/eco-hint.sh`, `extras/eco/eco-hint.sh`.
+
+- **`/recall` rewrite (F-M6).** The slash command is now a coached
+  interaction, not a shortcut. Normalizes the query (strip stop words,
+  extract identifiers, keep 2-3 terms), executes `memory_recall`, and
+  presents results with a mandatory output contract:
+  `query_in` / `query_used` / `strategy` / `hits` / `hint`.
+  On zero results, proposes exactly two next queries + mentions `/scan`
+  and `/reindex en`. Includes a query discipline recall-rate table.
+  File: `memctl/templates/eco/commands/recall.md`.
+
+- **ECO.md bypass rules narrowed (F-M4).** The bypass decision tree now
+  says "bypass for editing" instead of "bypass when you know the path."
+  Exploration of known files should still use `memory_recall` scoped to
+  the file's directory — knowing a path after a Grep hit does not justify
+  bypassing eco for understanding the module in context.
+  Files: `extras/eco/ECO.md`, `memctl/templates/eco/ECO.md`.
+
+### Added
+
+- **eco-nudge.sh PreToolUse hook (F-M2).** New template that fires before
+  Grep and Glob tool calls. Never blocks (exit 0 always). Injects a
+  one-line stderr reminder when ALL conditions are met: eco ON, DB exists
+  with >=200 indexed items, search looks like exploration (Grep pattern
+  >=6 chars or multi-term; Glob with `**` or wide wildcards). Silent on
+  small projects, narrow file lookups, and short symbol searches.
+  File: `memctl/templates/hooks/eco-nudge.sh`.
+
+- **install_eco.sh step 3b.** Installer now deploys `eco-nudge.sh` into
+  `.claude/hooks/` and registers the `PreToolUse` hook in
+  `settings.local.json`. Idempotent, backup-aware, dry-run compatible.
+  File: `memctl/scripts/install_eco.sh`.
+
+- **uninstall_eco.sh eco-nudge cleanup.** Uninstaller removes
+  `eco-nudge.sh` file and its `PreToolUse` hook registration.
+  File: `memctl/scripts/uninstall_eco.sh`.
+
+### Documentation
+
+- **`base/REVIEW_eco_compliance.md`** — diagnostic review covering root
+  cause analysis (6 memctl-side, 3 Toolbox-side, 3 platform constraints),
+  implemented fixes with concrete scripts, "where eco wins" framing,
+  authority ceiling analysis, validation protocol, and definition of done.
+
 ## [0.18.1] — 2026-02-24
 
 ### Fixed

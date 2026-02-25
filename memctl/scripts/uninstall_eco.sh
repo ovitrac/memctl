@@ -19,6 +19,7 @@ readonly SCRIPT_NAME="$(basename "$0")"
 # Target paths
 readonly CLAUDE_DIR=".claude"
 readonly HOOK_FILE="${CLAUDE_DIR}/hooks/eco-hint.sh"
+readonly NUDGE_FILE="${CLAUDE_DIR}/hooks/eco-nudge.sh"
 readonly ECO_DIR="${CLAUDE_DIR}/eco"
 readonly ECO_FILE="${ECO_DIR}/ECO.md"
 readonly COMMAND_FILE="${CLAUDE_DIR}/commands/eco.md"
@@ -80,6 +81,19 @@ if [[ -f "$HOOK_FILE" ]]; then
     REMOVED=$((REMOVED + 1))
 else
     info "Hook not found: $HOOK_FILE (already removed)"
+fi
+
+# Remove eco-nudge hook
+if [[ -f "$NUDGE_FILE" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+        info "[dry-run] Would remove: $NUDGE_FILE"
+    else
+        rm "$NUDGE_FILE"
+        ok "Removed: $NUDGE_FILE"
+    fi
+    REMOVED=$((REMOVED + 1))
+else
+    info "Nudge hook not found: $NUDGE_FILE (already removed or not installed)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -192,11 +206,26 @@ if 'UserPromptSubmit' in hooks:
     after = len(hooks['UserPromptSubmit'])
     if after < before:
         changed = True
-    # Remove empty list
     if not hooks['UserPromptSubmit']:
         del hooks['UserPromptSubmit']
-    # Remove empty hooks section
-    if not hooks:
+
+# Remove eco-nudge from PreToolUse
+if 'PreToolUse' in hooks:
+    before = len(hooks['PreToolUse'])
+    hooks['PreToolUse'] = [
+        e for e in hooks['PreToolUse']
+        if 'eco-nudge' not in json.dumps(e)
+    ]
+    after = len(hooks['PreToolUse'])
+    if after < before:
+        changed = True
+        print(f'  Removed eco-nudge PreToolUse hook')
+    if not hooks['PreToolUse']:
+        del hooks['PreToolUse']
+
+# Remove empty hooks section
+if not hooks:
+    if 'hooks' in config:
         del config['hooks']
 
 # Remove eco permission patterns
