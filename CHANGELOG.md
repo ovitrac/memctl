@@ -4,6 +4,20 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.3] — 2026-02-25
+
+### Fixed
+
+- **eco-nudge.sh Bash(find) blind spot.** The PreToolUse hook now intercepts
+  `Bash` tool calls containing `find` or recursive `ls` commands — not just
+  Grep and Glob. On large indexed codebases, Claude Code reaches for
+  `find . -name '*.java'` via Bash, which sailed through the nudge undetected.
+  The hook now matches `find .`, `find /`, `ls -R`, and piped `| find` patterns.
+  Still never blocks (exit 0), still one-line stderr nudge, still silent on
+  small stores. Diagnosed via AdservioToolbox e2e playground validation on a
+  1200+ file Java codebase.
+  File: `memctl/templates/hooks/eco-nudge.sh`.
+
 ## [0.18.2] — 2026-02-25
 
 ### Changed (Eco Compliance — behavioral review)

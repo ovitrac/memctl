@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # eco-nudge.sh — PreToolUse hook: contextual eco reminder for search tools
 #
-# Fires before Grep and Glob tool calls. Does NOT block — always exits 0.
+# Fires before Grep, Glob, and Bash(find) tool calls. Does NOT block — always exits 0.
 # Injects a short stderr reminder when ALL of these conditions are true:
 #
 # Trigger conditions:
 #   1. eco is ON (no .memory/.eco-disabled sentinel)
 #   2. DB exists and is non-trivial (items >= 200)
-#   3. Tool is Grep or Glob
+#   3. Tool is Grep, Glob, or Bash containing a find command
 #   4. The search looks like exploration (not a narrow single-file lookup):
 #      - Grep: pattern length >= 6 OR pattern contains whitespace
 #      - Grep: NOT targeting a single specific file (path does not end in a file ext)
 #      - Glob: pattern contains ** or expands broadly
+#      - Bash: command starts with or pipes through find/ls on broad paths
 #
 # Design:
 #   - Never blocks (exit 0 always) — guidance, not enforcement
@@ -36,12 +37,12 @@ import json, sys
 d = json.load(sys.stdin)
 name = d.get('tool_name', '')
 inp = d.get('tool_input', {})
-# Grep fields
+# Grep/Glob fields
 pattern = inp.get('pattern', '')
 path = inp.get('path', '')
-# Glob fields
-glob_pattern = inp.get('pattern', '')
-print(f'{name}\t{pattern}\t{path}\t{glob_pattern}')
+# Bash fields
+command = inp.get('command', '')
+print(f'{name}\t{pattern}\t{path}\t{command}')
 " 2>/dev/null)" || exit 0
 
 TOOL_NAME="${TOOL_INFO%%	*}"
@@ -49,11 +50,20 @@ REST="${TOOL_INFO#*	}"
 PATTERN="${REST%%	*}"
 REST="${REST#*	}"
 PATH_ARG="${REST%%	*}"
-GLOB_PATTERN="${REST#*	}"
+BASH_CMD="${REST#*	}"
 
-# Only inspect search tools — everything else passes through
+# Only inspect search-like tools — everything else passes through
 case "$TOOL_NAME" in
     Grep|Glob) ;;
+    Bash)
+        # Only inspect Bash calls that look like find/ls exploration
+        case "$BASH_CMD" in
+            find\ *|*\|\ find\ *|*\|find\ *|ls\ -*R*|*"find ."*|*"find /"*)
+                ;; # fall through to eco check
+            *)
+                exit 0 ;;
+        esac
+        ;;
     *) exit 0 ;;
 esac
 
@@ -119,7 +129,7 @@ fi
 # ── Glob: check if this is a broad traversal ──
 if [ "$TOOL_NAME" = "Glob" ]; then
     # Only nudge for broad patterns (contains ** or wide wildcards)
-    case "$GLOB_PATTERN" in
+    case "$PATTERN" in
         *"**"*|*"*.*"*|*"*/"*)
             printf '[eco] %s indexed items. For structural overview, try: memory_inspect\n' \
                 "$ITEM_COUNT" >&2
@@ -127,6 +137,12 @@ if [ "$TOOL_NAME" = "Glob" ]; then
         # Narrow glob (e.g., "src/config/*.py") — no nudge
         *) ;;
     esac
+fi
+
+# ── Bash(find): intercept find/ls exploration ──
+if [ "$TOOL_NAME" = "Bash" ]; then
+    printf '[eco] %s indexed items. memory_inspect provides structural overview without find/ls. Try: memory_inspect or /recall <keywords>\n' \
+        "$ITEM_COUNT" >&2
 fi
 
 # Never block — always allow the tool to proceed
