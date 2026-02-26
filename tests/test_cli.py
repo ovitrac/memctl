@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 import pytest
 
 
@@ -552,7 +553,14 @@ class TestLoop:
 class TestServe:
     def test_serve_import_check(self, db):
         """serve with missing mcp dep exits non-zero with informative message."""
-        r = run(["serve", "--db", db, "-q"], env={"MEMCTL_DB": db})
+        # Pass --db-root to the DB's parent so the ServerGuard
+        # containment check doesn't reject the temp path before
+        # we can test the actual MCP import path.
+        db_root = str(Path(db).parent)
+        r = run(
+            ["serve", "--db", db, "--db-root", db_root, "-q"],
+            env={"MEMCTL_DB": db},
+        )
         # Either MCP deps are present (would block waiting for connection)
         # or not present (exit 1 or 2 with message about mcp)
         # Just verify it doesn't silently succeed without deps

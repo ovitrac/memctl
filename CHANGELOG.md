@@ -40,10 +40,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **CLI command count: 21 → 23.** Added `hooks` and `hooks-path`.
 
+### Fixed
+
+- **`test_serve_import_check` pre-existing failure.** The test was failing
+  because `create_server()` now applies a secure-by-default `db-root`
+  constraint (`~/.local/share/memctl/db`), which rejected the pytest
+  temp-directory DB path before reaching the MCP import check. Fix:
+  pass `--db-root` pointing to the test DB's parent directory so the
+  guard containment check passes, allowing the actual MCP import path
+  to be tested.
+  File: `tests/test_cli.py`.
+
 ### Tests
 
 - 34 new tests in `tests/test_hooks.py` (subprocess-based).
-- Total: ~1166 passed.
+- 1 pre-existing failure fixed in `tests/test_cli.py`.
+- Total: 1167 passed, 0 failures.
 
 ## [0.19.1] — 2026-02-25
 
