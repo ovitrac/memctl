@@ -284,12 +284,11 @@ else
     chmod +x "$HOOK_FILE"
     ok "Hook installed: $HOOK_FILE"
 
-    # Register in settings.local.json
+    # Register in settings.local.json (prefer CLI command for cross-platform)
     "$PYTHON_CMD" -c "
 import json, os, sys
 
 settings_path = sys.argv[1]
-hook_path = sys.argv[2]
 
 # Read existing config
 if os.path.exists(settings_path):
@@ -307,8 +306,9 @@ if 'hooks' not in config:
 
 # UserPromptSubmit — add eco-hint, preserve existing hooks
 hooks_list = config['hooks'].get('UserPromptSubmit', [])
-eco_entry = {'hooks': [{'type': 'command', 'command': hook_path}]}
-# Remove previous eco-hint entries (idempotent)
+# Cross-platform CLI command (replaces .sh file path)
+eco_entry = {'hooks': [{'type': 'command', 'command': 'memctl hooks eco-hint'}]}
+# Remove previous eco-hint entries (idempotent — catches both .sh and CLI)
 hooks_list = [e for e in hooks_list
               if 'eco-hint' not in json.dumps(e)]
 hooks_list.append(eco_entry)
@@ -319,7 +319,7 @@ with open(settings_path, 'w', encoding='utf-8') as f:
     f.write('\n')
 
 print(f'  Hook registered in {settings_path}')
-" "$SETTINGS_FILE" "$HOOK_FILE"
+" "$SETTINGS_FILE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -347,12 +347,11 @@ else
         chmod +x "$NUDGE_FILE"
         ok "Nudge hook installed: $NUDGE_FILE"
 
-        # Register PreToolUse hook in settings
+        # Register PreToolUse hook in settings (prefer CLI command for cross-platform)
         "$PYTHON_CMD" -c "
 import json, os, sys
 
 settings_path = sys.argv[1]
-hook_path = sys.argv[2]
 
 if os.path.exists(settings_path):
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -367,8 +366,9 @@ if 'hooks' not in config:
     config['hooks'] = {}
 
 hooks_list = config['hooks'].get('PreToolUse', [])
-nudge_entry = {'hooks': [{'type': 'command', 'command': hook_path}]}
-# Remove previous eco-nudge entries (idempotent)
+# Cross-platform CLI command (replaces .sh file path)
+nudge_entry = {'hooks': [{'type': 'command', 'command': 'memctl hooks eco-nudge'}]}
+# Remove previous eco-nudge entries (idempotent — catches both .sh and CLI)
 hooks_list = [e for e in hooks_list
               if 'eco-nudge' not in json.dumps(e)]
 hooks_list.append(nudge_entry)
@@ -379,7 +379,7 @@ with open(settings_path, 'w', encoding='utf-8') as f:
     f.write('\n')
 
 print(f'  PreToolUse hook registered in {settings_path}')
-" "$SETTINGS_FILE" "$NUDGE_FILE"
+" "$SETTINGS_FILE"
     fi
 fi
 

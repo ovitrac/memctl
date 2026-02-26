@@ -47,7 +47,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verify hooks exist
+# Verify memctl is installed (required for cross-platform CLI hooks)
+if ! command -v memctl &>/dev/null; then
+    warn "memctl command not found in PATH. Hooks will use 'memctl hooks <name>'."
+    warn "Ensure memctl is installed: pip install memctl"
+fi
+
+# Verify hook templates exist (reference copies)
 [[ -f "${HOOKS_DIR}/memctl_safety_guard.sh" ]] || fail "Hook not found: ${HOOKS_DIR}/memctl_safety_guard.sh"
 [[ -f "${HOOKS_DIR}/memctl_audit_logger.sh" ]] || fail "Hook not found: ${HOOKS_DIR}/memctl_audit_logger.sh"
 
@@ -55,8 +61,8 @@ done
 if [[ "$YES" == "false" && "$DRY_RUN" == "false" ]]; then
     printf "This will update: %s\n" "$SETTINGS_FILE"
     printf "Hooks:\n"
-    printf "  PreToolUse:  %s\n" "${HOOKS_DIR}/memctl_safety_guard.sh"
-    printf "  PostToolUse: %s\n" "${HOOKS_DIR}/memctl_audit_logger.sh"
+    printf "  PreToolUse:  memctl hooks safety-guard\n"
+    printf "  PostToolUse: memctl hooks audit-logger\n"
     printf "\nProceed? [y/N] "
     read -r answer
     [[ "$answer" =~ ^[Yy] ]] || { info "Aborted."; exit 0; }
@@ -66,19 +72,18 @@ info "Installing Claude Code hooks"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     info "[dry-run] Would update: $SETTINGS_FILE"
-    info "[dry-run] PreToolUse → ${HOOKS_DIR}/memctl_safety_guard.sh"
-    info "[dry-run] PostToolUse → ${HOOKS_DIR}/memctl_audit_logger.sh"
+    info "[dry-run] PreToolUse → memctl hooks safety-guard"
+    info "[dry-run] PostToolUse → memctl hooks audit-logger"
     exit 0
 fi
 
 # Update settings.json with Python (no jq dependency)
+# Uses cross-platform CLI commands instead of .sh file paths
 python3 -c "
 import json, os, shutil, sys
 from datetime import datetime
 
 settings_path = sys.argv[1]
-guard_path = sys.argv[2]
-logger_path = sys.argv[3]
 
 # Read or create
 if os.path.exists(settings_path):
@@ -100,18 +105,21 @@ else:
 if 'hooks' not in config:
     config['hooks'] = {}
 
-# PreToolUse
+# PreToolUse — cross-platform CLI command
 pre = config['hooks'].get('PreToolUse', [])
-guard_entry = {'hooks': [{'type': 'command', 'command': guard_path}]}
-# Remove existing memctl guard entries
-pre = [e for e in pre if 'memctl_safety_guard' not in json.dumps(e)]
+guard_entry = {'hooks': [{'type': 'command', 'command': 'memctl hooks safety-guard'}]}
+# Remove existing memctl guard entries (catches both .sh and CLI)
+pre = [e for e in pre if 'safety-guard' not in json.dumps(e)
+       and 'memctl_safety_guard' not in json.dumps(e)]
 pre.append(guard_entry)
 config['hooks']['PreToolUse'] = pre
 
-# PostToolUse
+# PostToolUse — cross-platform CLI command
 post = config['hooks'].get('PostToolUse', [])
-logger_entry = {'hooks': [{'type': 'command', 'command': logger_path}]}
-post = [e for e in post if 'memctl_audit_logger' not in json.dumps(e)]
+logger_entry = {'hooks': [{'type': 'command', 'command': 'memctl hooks audit-logger'}]}
+# Remove existing memctl logger entries (catches both .sh and CLI)
+post = [e for e in post if 'audit-logger' not in json.dumps(e)
+        and 'memctl_audit_logger' not in json.dumps(e)]
 post.append(logger_entry)
 config['hooks']['PostToolUse'] = post
 
@@ -120,8 +128,8 @@ with open(settings_path, 'w', encoding='utf-8') as f:
     f.write('\n')
 
 print(f'  Updated: {settings_path}')
-" "$SETTINGS_FILE" "${HOOKS_DIR}/memctl_safety_guard.sh" "${HOOKS_DIR}/memctl_audit_logger.sh"
+" "$SETTINGS_FILE"
 
 ok "Hooks installed"
-printf "\n  PreToolUse:  %s\n" "${HOOKS_DIR}/memctl_safety_guard.sh"
-printf "  PostToolUse: %s\n\n" "${HOOKS_DIR}/memctl_audit_logger.sh"
+printf "\n  PreToolUse:  memctl hooks safety-guard\n"
+printf "  PostToolUse: memctl hooks audit-logger\n\n"

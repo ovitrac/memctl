@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memctl"
-version = "0.19.1"
+version = "0.20.0"
 description = "A Unix-native memory control plane for LLM orchestration"
 authors = [
     {name = "Olivier Vitrac", email = "olivier.vitrac@adservio.fr"}
@@ -58,9 +58,11 @@ include = ["memctl*"]
 memctl = [
     "scripts/*.sh",
     "templates/eco/*.sh",
+    "templates/eco/*.py",
     "templates/eco/*.md",
     "templates/eco/commands/*.md",
     "templates/hooks/*.sh",
+    "templates/hooks/*.py",
 ]
 
 [tool.ruff]

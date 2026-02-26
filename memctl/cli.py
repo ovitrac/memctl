@@ -22,6 +22,8 @@ Commands:
     memctl import [FILE] [--preserve-ids]    — JSONL import from file or stdin
     memctl reindex [--tokenizer PRESET]      — rebuild FTS5 index
     memctl doctor [--json]                   — environment health check
+    memctl hooks  <name>                     — run a Claude Code hook (cross-platform)
+    memctl hooks-path                        — print hook template directories
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -1830,6 +1832,32 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: hooks  (cross-platform hook dispatcher)
+# ===========================================================================
+
+
+def cmd_hooks(args: argparse.Namespace) -> None:
+    """Dispatch to a Claude Code hook implementation."""
+    from memctl.hooks import run_hook
+    run_hook(args.hook_name)
+
+
+# ===========================================================================
+# Command: hooks-path  (hook template directory discovery)
+# ===========================================================================
+
+
+def cmd_hooks_path(args: argparse.Namespace) -> None:
+    """Print directories containing hook template scripts."""
+    from importlib.resources import files
+    templates = files("memctl") / "templates"
+    hooks_dir = templates / "hooks"
+    eco_dir = templates / "eco"
+    print(hooks_dir)
+    print(eco_dir)
+
+
+# ===========================================================================
 # Command: scripts-path  (print bundled scripts location)
 # ===========================================================================
 
@@ -2376,6 +2404,25 @@ def main() -> None:
         help="Environment health check",
     )
     p_doctor.set_defaults(func=cmd_doctor)
+
+    # -- hooks -------------------------------------------------------------
+    p_hooks = sub.add_parser(
+        "hooks",
+        help="Run a Claude Code hook (eco-hint, eco-nudge, safety-guard, audit-logger)",
+    )
+    p_hooks.add_argument(
+        "hook_name",
+        choices=["eco-hint", "eco-nudge", "safety-guard", "audit-logger"],
+        help="Hook to execute",
+    )
+    p_hooks.set_defaults(func=cmd_hooks)
+
+    # -- hooks-path --------------------------------------------------------
+    p_hookspath = sub.add_parser(
+        "hooks-path",
+        help="Print directories containing hook template scripts",
+    )
+    p_hookspath.set_defaults(func=cmd_hooks_path)
 
     # -- scripts-path ------------------------------------------------------
 

@@ -4,6 +4,47 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.0] — 2026-02-26
+
+### Added
+
+- **`memctl hooks <name>` — cross-platform hook dispatcher.** All 4
+  Claude Code hooks available as Python subcommands: `eco-hint`,
+  `eco-nudge`, `safety-guard`, `audit-logger`. Eliminates the Bash
+  dependency for hook execution. Same stdin/stdout/stderr contracts
+  and exit codes as the shell versions.
+  New module: `memctl/hooks.py` (~280 lines, stdlib only).
+  Files: `memctl/hooks.py`, `memctl/cli.py`.
+
+- **`.py` hook templates alongside `.sh`.** Thin wrappers that import
+  from `memctl.hooks`. Enables file-based discovery by AdservioToolbox
+  (`_resolve_hook()` swaps `.sh` → `.py`).
+  Files: `memctl/templates/eco/eco-hint.py`,
+  `memctl/templates/hooks/eco-nudge.py`,
+  `memctl/templates/hooks/memctl_safety_guard.py`,
+  `memctl/templates/hooks/memctl_audit_logger.py`.
+
+- **`memctl hooks-path` — hook directory discovery.** Prints the
+  directories containing hook template scripts. Matches CloakMCP
+  `cloak hooks-path` contract.
+  File: `memctl/cli.py`.
+
+### Changed
+
+- **Install scripts use CLI hooks.** `install_eco.sh` and
+  `install_claude_hooks.sh` now register `memctl hooks <name>` in
+  settings.json instead of `.sh` file paths. Idempotent: old entries
+  replaced automatically on re-install.
+  Files: `memctl/scripts/install_eco.sh`,
+  `memctl/scripts/install_claude_hooks.sh`.
+
+- **CLI command count: 21 → 23.** Added `hooks` and `hooks-path`.
+
+### Tests
+
+- 34 new tests in `tests/test_hooks.py` (subprocess-based).
+- Total: ~1166 passed.
+
 ## [0.19.1] — 2026-02-25
 
 ### Fixed (Cold-start discipline — field report feedback)
