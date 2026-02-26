@@ -1,6 +1,6 @@
 # memctl Quickstart
 
-**Version**: 0.12.0 | **Time to first recall: ~3 minutes**
+**Version**: 0.21.1 | **Time to first recall: ~3 minutes**
 
 memctl gives LLMs persistent, structured, policy-governed memory backed by a single SQLite file. Ingest files, recall with FTS5, pipe into any LLM. Zero dependencies beyond Python's stdlib.
 
@@ -36,7 +36,7 @@ pip install memctl[all]
 memctl --help
 ```
 
-You should see the list of 16 commands. If you see `memctl: command not found`, your venv is not activated or pip install target is not on your PATH.
+You should see the list of 23 commands. If you see `memctl: command not found`, your venv is not activated or pip install target is not on your PATH.
 
 **Requirements:** Python 3.10+ (3.12 recommended). No compiled dependencies for core.
 PDF extraction requires `pdftotext` from poppler-utils (`sudo apt install poppler-utils` or `brew install poppler`).
@@ -188,7 +188,7 @@ Every turn's recall is restricted to items from the target folder.
 
 | Platform | Integration | Workflow |
 |----------|------------|----------|
-| **Claude Code (terminal)** | MCP server (14 tools) + optional hooks | Install MCP, then tools are auto-discovered |
+| **Claude Code (terminal)** | MCP server (21 tools) + optional hooks | Install MCP, then tools are auto-discovered |
 | **Claude Code in VS Code** | Same MCP via Claude Code extension | Same as terminal — extension uses CLI |
 | **Claude Desktop (macOS)** | MCP server | Configure in `claude_desktop_config.json` |
 | **Any LLM CLI** | Unix pipes | `memctl push ... \| llm "..." \| memctl pull ...` |
@@ -198,7 +198,7 @@ Every turn's recall is restricted to items from the target folder.
 ### Key rule
 
 memctl works with **any** LLM via Unix pipes. The only difference is integration depth:
-- **Claude Code / Desktop**: MCP tools provide rich, structured access (14 tools)
+- **Claude Code / Desktop**: MCP tools provide rich, structured access (21 tools)
 - **Everything else**: use the CLI directly — `push`, `pull`, `search`, `ask`, `loop`, `chat`
 
 ---
@@ -276,17 +276,19 @@ The MCP server applies four protection layers by default:
 | **L2** | `MemoryPolicy` | 35 detection patterns (secrets, injection, instructional, PII) |
 | **L3** | Claude Code hooks | Optional: PreToolUse safety guard + PostToolUse audit logger |
 
-### Available MCP tools (14)
+### Available MCP tools (21)
 
 | Tool | Description |
 |------|-------------|
 | `memory_recall` | Token-budgeted context injection (primary tool) |
+| `memory_recall_best_effort` | Multi-step coached retrieval with retry cascade |
 | `memory_search` | Interactive FTS5 discovery |
 | `memory_propose` | Store findings with policy governance |
 | `memory_write` | Direct write (policy-checked) |
 | `memory_read` | Read items by ID |
 | `memory_stats` | Store metrics |
 | `memory_consolidate` | Trigger deterministic merge |
+| `memory_promote` | Manual tier curation (STM → MTM → LTM) |
 | `memory_mount` | Register, list, or remove folder mounts |
 | `memory_sync` | Sync mounted folders (delta or full) |
 | `memory_inspect` | Structural injection block from corpus |
@@ -294,6 +296,11 @@ The MCP server applies four protection layers by default:
 | `memory_export` | JSONL export with filters |
 | `memory_import` | JSONL import with policy enforcement |
 | `memory_loop` | Bounded recall-answer loop |
+| `memory_reindex` | Rebuild FTS5 index with new tokenizer |
+| `memory_diff` | Compare two items or tiers |
+| `memory_status` | Item lifecycle and validation state |
+| `memory_reset` | Clear store (with VACUUM) |
+| `memory_chat` | Multi-turn conversational recall |
 
 ---
 
@@ -382,7 +389,7 @@ memctl is extracted from [RAGIX](https://github.com/ovitrac/RAGIX) and maintains
 
 ### How does policy enforcement work?
 
-Every write path passes through the policy engine. 35 detection patterns check for secrets (API keys, tokens), prompt injection, instructional content, and PII. Dangerous content is rejected; borderline content is quarantined (stored but not injectable into LLM context).
+Every write path passes through the policy engine — **safe by default** since v0.21.0. 35 detection patterns check for secrets (API keys, tokens), prompt injection, instructional content, and PII. Dangerous content is rejected before storage; borderline content is quarantined (stored but not injectable into LLM context). Policy is also re-evaluated after consolidation merge. See [SECURITY.md](SECURITY.md) for the full threat model.
 
 ### Can I use memctl without the MCP server?
 
@@ -435,4 +442,4 @@ No. memctl is a Unix CLI tool and MCP server. For visual exploration, use `memct
 
 ---
 
-*memctl v0.12.0 — Olivier Vitrac, Adservio Innovation Lab*
+*memctl v0.21.1 — Olivier Vitrac, Adservio Innovation Lab*

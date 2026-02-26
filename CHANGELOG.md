@@ -4,6 +4,22 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.1] — 2026-02-26
+
+### Added
+
+- **`SECURITY.md` — security policy and threat model.** Responsible
+  disclosure instructions, 5-layer defense architecture, policy
+  enforcement scope, security invariants, and supported versions.
+  File: `SECURITY.md`.
+
+### Changed
+
+- **`QUICKSTART.md` updated to v0.21.1.** Stale references corrected:
+  version 0.12.0 → 0.21.1, CLI commands 16 → 23, MCP tools 14 → 21
+  (full tool table), policy FAQ now references safe-by-default (v0.21.0)
+  and links to `SECURITY.md`.
+
 ## [0.21.0] — 2026-02-26
 
 ### Security
