@@ -68,8 +68,8 @@ _SECRET_PATTERNS = [
     re.compile(r"(?:aws_access_key_id|aws_secret_access_key)\s*[:=]\s*\S+", re.IGNORECASE),
     re.compile(r"ghp_[A-Za-z0-9]{36,}", re.IGNORECASE),  # GitHub PAT
     re.compile(r"sk-[A-Za-z0-9]{20,}", re.IGNORECASE),    # OpenAI-style key
-    re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}", re.IGNORECASE),  # JWT
-    re.compile(r"[A-Za-z0-9+/]{60,}={1,2}", re.IGNORECASE),  # long base64 with padding (> 60 chars)
+    re.compile(r"eyJ[A-Za-z0-9_-]{20,500}\.[A-Za-z0-9_-]{20,500}", re.IGNORECASE),  # JWT (bounded to prevent O(n²))
+    re.compile(r"[A-Za-z0-9+/]{60,1000}={1,2}", re.IGNORECASE),  # long base64 with padding (bounded)
 ]
 
 # Injection / prompt override patterns

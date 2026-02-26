@@ -262,6 +262,8 @@ def cmd_push(args: argparse.Namespace) -> None:
             total.files_processed += r.files_processed
             total.files_skipped += r.files_skipped
             total.chunks_created += r.chunks_created
+            total.rejected_policy += r.rejected_policy
+            total.quarantined += r.quarantined
             total.item_ids.extend(r.item_ids)
 
         _info(
@@ -269,6 +271,13 @@ def cmd_push(args: argparse.Namespace) -> None:
             f"{total.files_processed} file(s) "
             f"({total.files_skipped} skipped)"
         )
+        if total.rejected_policy:
+            _info(f"[push] Policy rejected: {total.rejected_policy} chunks")
+        if total.quarantined:
+            _info(
+                f"[push] Policy quarantined: {total.quarantined} chunks "
+                "(stored, non-injectable)"
+            )
         if total.chunks_created > 0:
             _info(
                 "[push] Next: memctl search <keywords>  or  "

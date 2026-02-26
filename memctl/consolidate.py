@@ -42,6 +42,9 @@ from memctl.types import (
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for safe-by-default policy (v0.21 — closes consolidation bypass).
+_DEFAULT_POLICY = object()
+
 
 def _jaccard(a: Set[str], b: Set[str]) -> float:
     """Jaccard similarity between two sets."""
@@ -237,10 +240,23 @@ class ConsolidationPipeline:
         self,
         store: MemoryStore,
         config: Optional[ConsolidateConfig] = None,
+        policy=_DEFAULT_POLICY,
     ):
-        """Initialize consolidation pipeline with store and config."""
+        """Initialize consolidation pipeline with store and config.
+
+        Args:
+            policy: Policy engine for post-merge evaluation. Default: active
+                (MemoryPolicy()). Pass ``None`` or ``False`` to disable.
+        """
         self._store = store
         self._config = config or ConsolidateConfig()
+        # Resolve policy (v0.21 — safe by default)
+        if policy is _DEFAULT_POLICY:
+            from memctl.policy import MemoryPolicy
+            policy = MemoryPolicy()
+        elif policy is False:
+            policy = None
+        self._policy = policy
 
     def _distinct_scopes(self) -> List[str]:
         """Return distinct scope values from non-archived STM items."""
@@ -283,6 +299,7 @@ class ConsolidationPipeline:
                 "clusters_found": 0,
                 "items_merged": 0,
                 "items_promoted": 0,
+                "items_quarantined": 0,
                 "merge_chains": [],
                 "scopes_processed": [],
             }
@@ -292,6 +309,7 @@ class ConsolidationPipeline:
                 combined["clusters_found"] += result["clusters_found"]
                 combined["items_merged"] += result["items_merged"]
                 combined["items_promoted"] += result["items_promoted"]
+                combined["items_quarantined"] += result["items_quarantined"]
                 combined["merge_chains"].extend(result["merge_chains"])
                 combined["scopes_processed"].append(s)
             return combined
@@ -301,6 +319,7 @@ class ConsolidationPipeline:
             "clusters_found": 0,
             "items_merged": 0,
             "items_promoted": 0,
+            "items_quarantined": 0,
             "merge_chains": [],
         }
 
@@ -335,9 +354,17 @@ class ConsolidationPipeline:
                 })
             return stats
 
-        # Step 3-5: Merge, write, archive
+        # Step 3-5: Merge, policy re-check, write, archive
         for cluster in clusters:
             merged = _deterministic_merge(cluster)
+
+            # Policy re-evaluation on merged content (quarantine only, never reject)
+            if self._policy is not None:
+                verdict = self._policy.evaluate_item(merged)
+                if verdict.forced_non_injectable and merged.injectable:
+                    merged.injectable = False
+                    stats["items_quarantined"] += 1
+
             self._store.write_item(merged, reason="consolidate")
 
             # Write supersedes links (new -> old) and archive originals

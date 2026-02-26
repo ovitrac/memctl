@@ -39,6 +39,10 @@ from memctl.types import MemoryItem, MemoryProvenance
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for safe-by-default policy (v0.21 — closes ingest bypass).
+# External callers never see this; it triggers lazy MemoryPolicy() creation.
+_DEFAULT_POLICY = object()
+
 # ---------------------------------------------------------------------------
 # Result
 # ---------------------------------------------------------------------------
@@ -52,6 +56,8 @@ class IngestResult:
     files_skipped: int = 0       # already in corpus_hashes with same sha256
     chunks_created: int = 0
     item_ids: List[str] = field(default_factory=list)
+    rejected_policy: int = 0     # chunks rejected by policy (not stored)
+    quarantined: int = 0         # chunks quarantined (stored, non-injectable)
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +337,7 @@ def ingest_file(
     tags: Optional[List[str]] = None,
     format_mode: str = "text",
     injectable: bool = False,
+    policy=_DEFAULT_POLICY,
 ) -> IngestResult:
     """
     Ingest a single file into memory.  Idempotent via corpus_hashes.
@@ -345,10 +352,19 @@ def ingest_file(
         tags: Extra tags to attach to every chunk.
         format_mode: "text" (plain) or "auto" (infer tags/title from path).
         injectable: Whether chunks are injectable (default False for raw ingest).
+        policy: Policy engine for write-time evaluation. Default: active
+            (MemoryPolicy()). Pass ``None`` or ``False`` to explicitly
+            disable policy (e.g. trusted internal writes).
 
     Returns:
         IngestResult with counts and item IDs.
     """
+    # Resolve policy (v0.21 — safe by default)
+    if policy is _DEFAULT_POLICY:
+        from memctl.policy import MemoryPolicy
+        policy = MemoryPolicy()
+    elif policy is False:
+        policy = None
     abs_path = os.path.abspath(path)
 
     # Read file — text files directly, binary formats via extractors
@@ -376,7 +392,8 @@ def ingest_file(
         logger.warning("No content to ingest from %s", path)
         return IngestResult(files_processed=1)
 
-    # Write items
+    # Write items (result tracks policy counters across chunks)
+    result = IngestResult(files_processed=1)
     item_ids: List[str] = []
     for i, (chunk_text, start_line, end_line) in enumerate(chunks):
         title = f"{title_base} [{i + 1}/{len(chunks)}]" if len(chunks) > 1 else title_base
@@ -409,6 +426,20 @@ def ingest_file(
             injectable=injectable,
         )
 
+        # Policy gate (v0.21 — closes ingest bypass)
+        if policy is not None:
+            verdict = policy.evaluate_item(item)
+            if verdict.action == "reject":
+                logger.warning(
+                    "Ingest rejected by policy: %s chunk %d (%s)",
+                    path, i, "; ".join(verdict.reasons),
+                )
+                result.rejected_policy += 1
+                continue  # skip this chunk
+            if verdict.forced_non_injectable:
+                item.injectable = False
+                result.quarantined += 1
+
         store.write_item(item, reason="ingest")
         item_ids.append(item.id)
 
@@ -424,11 +455,9 @@ def ingest_file(
         path, len(chunks), item_ids[0] if item_ids else "none",
     )
 
-    return IngestResult(
-        files_processed=1,
-        chunks_created=len(chunks),
-        item_ids=item_ids,
-    )
+    result.chunks_created = len(chunks) - result.rejected_policy
+    result.item_ids = item_ids
+    return result
 
 
 def ingest_stdin(
@@ -440,12 +469,25 @@ def ingest_stdin(
     max_tokens: int = 1800,
     tags: Optional[List[str]] = None,
     injectable: bool = False,
+    policy=_DEFAULT_POLICY,
 ) -> IngestResult:
     """
     Ingest stdin content into memory.
 
     Uses text SHA-256 for dedup (source_id = "<stdin>").
+
+    Args:
+        policy: Policy engine for write-time evaluation. Default: active
+            (MemoryPolicy()). Pass ``None`` or ``False`` to explicitly
+            disable policy.
     """
+    # Resolve policy (v0.21 — safe by default)
+    if policy is _DEFAULT_POLICY:
+        from memctl.policy import MemoryPolicy
+        policy = MemoryPolicy()
+    elif policy is False:
+        policy = None
+
     text = sys.stdin.read()
     if not text.strip():
         return IngestResult()
@@ -463,6 +505,7 @@ def ingest_stdin(
     if not chunks:
         return IngestResult()
 
+    result = IngestResult(files_processed=1)
     item_ids: List[str] = []
     for i, (chunk_text, start_line, end_line) in enumerate(chunks):
         title = f"stdin [{i + 1}/{len(chunks)}]" if len(chunks) > 1 else "stdin"
@@ -489,13 +532,25 @@ def ingest_stdin(
             injectable=injectable,
         )
 
+        # Policy gate (v0.21 — closes ingest bypass)
+        if policy is not None:
+            verdict = policy.evaluate_item(item)
+            if verdict.action == "reject":
+                logger.warning(
+                    "Ingest rejected by policy: <stdin> chunk %d (%s)",
+                    i, "; ".join(verdict.reasons),
+                )
+                result.rejected_policy += 1
+                continue
+            if verdict.forced_non_injectable:
+                item.injectable = False
+                result.quarantined += 1
+
         store.write_item(item, reason="ingest")
         item_ids.append(item.id)
 
     store.write_corpus_hash("<stdin>", sha256, len(chunks), item_ids)
 
-    return IngestResult(
-        files_processed=1,
-        chunks_created=len(chunks),
-        item_ids=item_ids,
-    )
+    result.chunks_created = len(chunks) - result.rejected_policy
+    result.item_ids = item_ids
+    return result

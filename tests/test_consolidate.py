@@ -1,10 +1,12 @@
 """
 Tests for memctl.consolidate — clustering, merge, source affinity,
-content similarity, and effective similarity with path bonus.
+content similarity, effective similarity with path bonus, and policy
+re-evaluation on merge (v0.21).
 
 P1 tests (v0.16.2): source-path affinity gate + multi-scope consolidation.
 P2 tests (v0.16.4): content-similarity gate.
 P3 tests (v0.16.4): path-bonus in effective similarity.
+P2-policy tests (v0.21): post-merge policy quarantine.
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
@@ -22,6 +24,7 @@ from memctl.consolidate import (
     _deterministic_merge,
     ConsolidationPipeline,
 )
+from memctl.policy import MemoryPolicy
 from memctl.store import MemoryStore
 from memctl.types import MemoryItem, MemoryProvenance
 
@@ -434,3 +437,141 @@ class TestEffectiveSimilarity:
         # Jaccard = 3/5 = 0.6 < 0.7, but path bonus +0.15 → 0.75 >= 0.7
         clusters = _coarse_cluster([a, b], distance_threshold=0.3, min_content_similarity=0.15)
         assert len(clusters) == 1
+
+
+# ── P2-policy: Post-merge policy re-evaluation (v0.21) ──────────────
+
+class TestConsolidatePolicy:
+    """Tests for policy enforcement during consolidation (v0.21)."""
+
+    def _populate_clean(self, store, n=3, scope="project"):
+        """Write n clean injectable STM items that will cluster."""
+        for i in range(n):
+            store.write_item(MemoryItem(
+                type="note",
+                tags=["arch", "design"],
+                content=f"Clean architecture decision {i} about service patterns.",
+                scope=scope,
+                injectable=True,
+            ), reason="test")
+
+    def _populate_pii(self, store, n=3, scope="project"):
+        """Write n items containing PII that will cluster."""
+        for i in range(n):
+            store.write_item(MemoryItem(
+                type="note",
+                tags=["contacts", "team"],
+                content=f"Team member {i}: alice{i}@example.com is the lead.",
+                scope=scope,
+                injectable=True,
+            ), reason="test")
+
+    def test_merge_clean_items_injectable(self, db_path):
+        """Merging clean items → merged item injectable=True."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            self._populate_clean(store)
+            pipeline = ConsolidationPipeline(store)
+            result = pipeline.run(scope="project")
+            assert result["items_merged"] >= 2
+            assert result["items_quarantined"] == 0
+            # Merged items should be injectable
+            mtm_items = store.list_items(tier="mtm", exclude_archived=True)
+            for item in mtm_items:
+                assert item.injectable is True
+        finally:
+            store.close()
+
+    def test_merge_pii_quarantined(self, db_path):
+        """Merged content containing PII → injectable=False."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            self._populate_pii(store)
+            pipeline = ConsolidationPipeline(store)
+            result = pipeline.run(scope="project")
+            assert result["items_merged"] >= 2
+            assert result["items_quarantined"] >= 1
+            # Merged items should be non-injectable
+            mtm_items = store.list_items(tier="mtm", exclude_archived=True)
+            for item in mtm_items:
+                if "example.com" in item.content:
+                    assert item.injectable is False
+
+        finally:
+            store.close()
+
+    def test_merge_quarantine_only_on_flag_change(self, db_path):
+        """Already non-injectable items don't increment quarantine count."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            # Write items that are already non-injectable AND contain PII
+            for i in range(3):
+                store.write_item(MemoryItem(
+                    type="note",
+                    tags=["contacts", "team"],
+                    content=f"Contact {i}: bob{i}@example.com",
+                    scope="project",
+                    injectable=False,  # already quarantined
+                ), reason="test")
+            pipeline = ConsolidationPipeline(store)
+            result = pipeline.run(scope="project")
+            # Should NOT count as quarantined (flag was already False)
+            assert result["items_quarantined"] == 0
+        finally:
+            store.close()
+
+    def test_merge_no_rejection(self, db_path):
+        """Consolidation never rejects — only quarantines."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            # Even items with secrets: they were already stored, merge should proceed
+            for i in range(3):
+                store.write_item(MemoryItem(
+                    type="note",
+                    tags=["config", "env"],
+                    content=f"Config {i}: api_key = sk-abcdefghij{i}234567890secret",
+                    scope="project",
+                    injectable=True,
+                ), reason="test")
+            pipeline = ConsolidationPipeline(store)
+            result = pipeline.run(scope="project")
+            # Items should still be merged (consolidation doesn't reject)
+            if result["clusters_found"] > 0:
+                assert result["items_merged"] >= 2
+        finally:
+            store.close()
+
+    def test_consolidation_stats_quarantine_count(self, db_path):
+        """Stats include items_quarantined key."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            self._populate_clean(store)
+            pipeline = ConsolidationPipeline(store)
+            result = pipeline.run(scope="project")
+            assert "items_quarantined" in result
+        finally:
+            store.close()
+
+    def test_consolidation_default_policy_active(self, db_path):
+        """Default policy (no arg) applies evaluation."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            self._populate_pii(store)
+            # No policy argument → default is active
+            pipeline = ConsolidationPipeline(store)
+            result = pipeline.run(scope="project")
+            assert result["items_quarantined"] >= 1
+        finally:
+            store.close()
+
+    def test_consolidation_explicit_none_skips(self, db_path):
+        """policy=None opts out of policy re-evaluation."""
+        store = MemoryStore(db_path=db_path)
+        try:
+            self._populate_pii(store)
+            pipeline = ConsolidationPipeline(store, policy=None)
+            result = pipeline.run(scope="project")
+            # No policy → quarantine count stays 0
+            assert result["items_quarantined"] == 0
+        finally:
+            store.close()

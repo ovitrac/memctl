@@ -1,10 +1,12 @@
 """
-Tests for memctl.ingest — Chunking, file dedup, source resolution.
+Tests for memctl.ingest — Chunking, file dedup, source resolution, policy on ingest.
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
 
 import os
+import subprocess
+import sys
 import pytest
 
 from memctl.ingest import (
@@ -18,6 +20,7 @@ from memctl.ingest import (
     _infer_tags_from_path,
     _infer_title,
 )
+from memctl.policy import MemoryPolicy
 from memctl.store import MemoryStore
 
 
@@ -275,3 +278,179 @@ class TestCamelCaseExpansion:
         assert "get" in result
         assert "user" in result
         assert "profile" in result
+
+
+# ---------------------------------------------------------------------------
+# Policy on ingest (v0.21 — closes ingest bypass)
+# ---------------------------------------------------------------------------
+
+
+class TestIngestPolicy:
+    """Tests for policy enforcement during ingest (v0.21)."""
+
+    def test_default_policy_active(self, store, tmp_path):
+        """Default policy (no explicit arg) applies evaluation."""
+        f = tmp_path / "secret.txt"
+        f.write_text(
+            "Config line:\napi_key = sk-abcdefghij1234567890secret\n",
+            encoding="utf-8",
+        )
+        result = ingest_file(store, str(f))
+        # Secret pattern triggers rejection
+        assert result.rejected_policy >= 1
+        assert result.chunks_created == 0
+
+    def test_explicit_none_skips_policy(self, store, tmp_path):
+        """policy=None explicitly opts out of policy."""
+        f = tmp_path / "secret.txt"
+        f.write_text(
+            "Config:\napi_key = sk-abcdefghij1234567890secret\n",
+            encoding="utf-8",
+        )
+        result = ingest_file(store, str(f), policy=None)
+        # No policy → secret stored as-is
+        assert result.rejected_policy == 0
+        assert result.chunks_created >= 1
+
+    def test_explicit_false_skips_policy(self, store, tmp_path):
+        """policy=False explicitly opts out of policy."""
+        f = tmp_path / "secret.txt"
+        f.write_text(
+            "Config:\napi_key = sk-abcdefghij1234567890secret\n",
+            encoding="utf-8",
+        )
+        result = ingest_file(store, str(f), policy=False)
+        assert result.rejected_policy == 0
+        assert result.chunks_created >= 1
+
+    def test_custom_policy(self, store, tmp_path):
+        """Custom MemoryPolicy instance is used."""
+        f = tmp_path / "clean.txt"
+        f.write_text("A clean document about architecture.\n", encoding="utf-8")
+        custom = MemoryPolicy()
+        result = ingest_file(store, str(f), policy=custom)
+        assert result.rejected_policy == 0
+        assert result.chunks_created >= 1
+
+    def test_secret_rejected(self, store, tmp_path):
+        """File containing API key → chunk rejected, not stored."""
+        f = tmp_path / "creds.env"
+        f.write_text("password = p4ssw0rd_very_secret_value\n", encoding="utf-8")
+        result = ingest_file(store, str(f))
+        assert result.rejected_policy >= 1
+        # Verify nothing stored
+        items = store.list_items(limit=100)
+        for it in items:
+            assert "p4ssw0rd" not in it.content
+
+    def test_jwt_rejected(self, store, tmp_path):
+        """File containing JWT → chunk rejected."""
+        jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0ZXN0IjoxMjM0NTY3ODkwfQ"
+        f = tmp_path / "token.txt"
+        f.write_text(f"Authorization: Bearer {jwt}\n", encoding="utf-8")
+        result = ingest_file(store, str(f))
+        assert result.rejected_policy >= 1
+
+    def test_pii_quarantined(self, store, tmp_path):
+        """File containing email → stored but injectable=False."""
+        f = tmp_path / "contacts.txt"
+        f.write_text(
+            "Contact directory\nalice@example.com is the lead.\n",
+            encoding="utf-8",
+        )
+        result = ingest_file(store, str(f), injectable=True)
+        assert result.quarantined >= 1
+        # Item exists but non-injectable
+        for item_id in result.item_ids:
+            item = store.read_item(item_id)
+            assert item.injectable is False
+
+    def test_quarantine_overrides_injectable_true(self, store, tmp_path):
+        """Quarantine sets injectable=False even when caller passes injectable=True."""
+        f = tmp_path / "pii.txt"
+        f.write_text("SSN: 123-45-6789\n", encoding="utf-8")
+        result = ingest_file(store, str(f), injectable=True)
+        assert result.quarantined >= 1
+        for item_id in result.item_ids:
+            item = store.read_item(item_id)
+            assert item.injectable is False
+
+    def test_clean_file_injectable(self, store, tmp_path):
+        """Clean file → items remain injectable=True."""
+        f = tmp_path / "clean.md"
+        f.write_text(
+            "# Design Notes\n\nWe use event-driven architecture.\n",
+            encoding="utf-8",
+        )
+        result = ingest_file(store, str(f), injectable=True)
+        assert result.rejected_policy == 0
+        assert result.quarantined == 0
+        for item_id in result.item_ids:
+            item = store.read_item(item_id)
+            assert item.injectable is True
+
+    def test_mixed_file(self, store, tmp_path):
+        """File with clean + secret chunks → clean stored, secret rejected."""
+        f = tmp_path / "mixed.md"
+        # Two paragraphs: one clean, one with secret (separate chunks)
+        clean = "A clean paragraph about software architecture patterns.\n" * 20
+        secret = "password = p4ssw0rd_very_secret_value_do_not_share\n" * 5
+        f.write_text(f"{clean}\n\n{secret}", encoding="utf-8")
+        result = ingest_file(store, str(f), max_tokens=300)
+        # At least one chunk rejected, at least one stored
+        assert result.rejected_policy >= 1
+        assert result.chunks_created >= 1
+
+    def test_result_rejected_counter(self, store, tmp_path):
+        """IngestResult.rejected_policy incremented on rejection."""
+        f = tmp_path / "key.txt"
+        f.write_text("ghp_abcdefghijklmnopqrstuvwxyz1234567890\n", encoding="utf-8")
+        result = ingest_file(store, str(f))
+        assert result.rejected_policy == 1
+
+    def test_result_quarantined_counter(self, store, tmp_path):
+        """IngestResult.quarantined incremented on quarantine."""
+        f = tmp_path / "pii.txt"
+        f.write_text("Contact: bob@example.com\n", encoding="utf-8")
+        result = ingest_file(store, str(f), injectable=True)
+        assert result.quarantined >= 1
+
+    def test_push_cli_default_policy(self, tmp_path):
+        """memctl push --source applies policy by default (subprocess)."""
+        db = str(tmp_path / "test.db")
+        f = tmp_path / "secret.txt"
+        f.write_text(
+            "api_key = sk-abcdefghij1234567890secret\n",
+            encoding="utf-8",
+        )
+        # Init DB first
+        subprocess.run(
+            [sys.executable, "-m", "memctl.cli", "init", "--db", db],
+            check=True, capture_output=True,
+        )
+        r = subprocess.run(
+            [sys.executable, "-m", "memctl.cli", "push",
+             "--db", db, "test", "--source", str(f)],
+            capture_output=True, text=True,
+        )
+        # Policy should reject the secret — stderr mentions rejection
+        assert "rejected" in r.stderr.lower() or "Policy rejected" in r.stderr
+
+    def test_push_stderr_reports_policy(self, tmp_path):
+        """stderr includes rejection count when non-zero."""
+        db = str(tmp_path / "test.db")
+        f = tmp_path / "secret.txt"
+        f.write_text(
+            "api_key = sk-abcdefghij1234567890secret\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [sys.executable, "-m", "memctl.cli", "init", "--db", db],
+            check=True, capture_output=True,
+        )
+        r = subprocess.run(
+            [sys.executable, "-m", "memctl.cli", "push",
+             "--db", db, "test", "--source", str(f)],
+            capture_output=True, text=True,
+        )
+        assert "Policy rejected" in r.stderr or "rejected" in r.stderr.lower()

@@ -416,3 +416,47 @@ class TestSyncScope:
             assert ids_a.isdisjoint(ids_b), "Scopes must be disjoint"
         finally:
             store.close()
+
+
+# ── Sync policy inheritance (v0.21) ──────────────────────────────────
+
+class TestSyncPolicy:
+    """Tests that sync inherits ingest policy (v0.21)."""
+
+    def test_sync_applies_policy_by_default(self, db_path, tmp_path):
+        """sync_mount uses default policy (inherits from ingest_file)."""
+        folder = tmp_path / "synctest"
+        folder.mkdir()
+        # Create a clean file
+        (folder / "clean.md").write_text("# Clean\n\nArchitecture notes.\n")
+        result = sync_mount(db_path, str(folder), quiet=True)
+        assert result.files_new == 1
+        assert result.chunks_created >= 1
+        # Verify items are injectable (clean content)
+        store = MemoryStore(db_path=db_path)
+        try:
+            items = store.list_items(limit=100)
+            for item in items:
+                if "Architecture" in item.content:
+                    assert item.injectable is True
+        finally:
+            store.close()
+
+    def test_sync_rejects_secret_files(self, db_path, tmp_path):
+        """Synced file containing API key → rejected by policy."""
+        folder = tmp_path / "synctest"
+        folder.mkdir()
+        (folder / "creds.txt").write_text(
+            "api_key = sk-abcdefghij1234567890secret\n"
+        )
+        result = sync_mount(db_path, str(folder), quiet=True)
+        # File was scanned but secret chunk rejected
+        assert result.files_new == 1
+        # Verify no secret in stored items
+        store = MemoryStore(db_path=db_path)
+        try:
+            items = store.list_items(limit=100)
+            for item in items:
+                assert "sk-abcdefghij" not in item.content
+        finally:
+            store.close()

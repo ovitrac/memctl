@@ -4,6 +4,47 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.0] — 2026-02-26
+
+### Security
+
+- **Policy enforcement on all write paths.** `ingest_file()` and
+  `ingest_stdin()` now evaluate every chunk against the 35-pattern
+  policy engine before storage. This closes the ingest bypass that
+  allowed secrets and PII to be stored with `injectable=True`.
+  **Safe by default:** policy is active unless explicitly disabled
+  with `policy=None` or `policy=False`. All CLI commands and MCP
+  tools enforce policy automatically. `memctl sync` inherits the fix
+  from `ingest_file()`.
+  Files: `memctl/ingest.py`, `memctl/cli.py`.
+
+- **Policy re-evaluation on consolidation merge.** Merged items are
+  re-evaluated against policy after deterministic merge. If merged
+  content triggers quarantine patterns, the item is marked
+  `injectable=False`. Only counts when the flag actually changes
+  (no noise from already-quarantined items). Consolidation never
+  rejects — only quarantines.
+  File: `memctl/consolidate.py`.
+
+- **Regex performance hardening.** JWT pattern and base64 pattern
+  now have upper bounds (`{20,500}`, `{60,1000}`) to prevent O(n²)
+  backtracking on adversarial input. Cross-referenced with CloakMCP
+  findings.
+  File: `memctl/policy.py`.
+
+### Added
+
+- **IngestResult policy counters.** `rejected_policy` and `quarantined`
+  fields report policy outcomes. `memctl push` stderr summary includes
+  counts when non-zero.
+  File: `memctl/ingest.py`.
+
+### Tests
+
+- 26 new tests (14 ingest policy, 7 consolidation policy,
+  3 regex performance, 2 sync policy inheritance).
+- Total: 1193 passed, 5 skipped.
+
 ## [0.20.0] — 2026-02-26
 
 ### Added

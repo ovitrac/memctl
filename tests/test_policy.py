@@ -1,9 +1,11 @@
 """
-Tests for memctl.policy — Secret detection, injection blocking, quarantine.
+Tests for memctl.policy — Secret detection, injection blocking, quarantine,
+regex performance (v0.21).
 
 Author: Olivier Vitrac, PhD, HDR | olivier.vitrac@adservio.fr | Adservio
 """
 
+import time
 import pytest
 
 from memctl.policy import MemoryPolicy, PolicyVerdict
@@ -233,3 +235,48 @@ class TestPolicyVerdict:
         )
         assert v.action == "quarantine"
         assert v.forced_non_injectable is True
+
+
+# ---------------------------------------------------------------------------
+# Regex performance (v0.21 — bounded patterns)
+# ---------------------------------------------------------------------------
+
+
+class TestPolicyPerformance:
+    """Regex performance tests (v0.21)."""
+
+    def test_jwt_pattern_bounded(self, policy):
+        """JWT pattern has upper bound — no O(n²) on long near-miss input."""
+        # Near-miss: valid prefix + long body + wrong ending
+        near_miss = "eyJ" + "A" * 5000 + "." + "B" * 5000 + "INVALID"
+        item = MemoryItem(title="Test", content=near_miss)
+        t0 = time.monotonic()
+        policy.evaluate_item(item)
+        dt = time.monotonic() - t0
+        # Budget is generous to avoid CI flakes — the guard catches O(n²)
+        # which would take seconds, not sub-second.
+        assert dt < 0.5, f"JWT evaluation took {dt:.3f}s (budget: 0.5s)"
+
+    def test_base64_pattern_bounded(self, policy):
+        """Base64 pattern has upper bound — no O(n²) on long input."""
+        # Near-miss: long base64-like string without trailing =
+        near_miss = "A" * 10000 + "!!"
+        item = MemoryItem(title="Test", content=near_miss)
+        t0 = time.monotonic()
+        policy.evaluate_item(item)
+        dt = time.monotonic() - t0
+        assert dt < 0.5, f"Base64 evaluation took {dt:.3f}s (budget: 0.5s)"
+
+    def test_policy_evaluation_100k_chunks(self):
+        """100K chunk evaluations complete within 10 seconds."""
+        policy = MemoryPolicy()
+        chunks = [
+            MemoryItem(content=f"Clean content line {i} about architecture " * 3)
+            for i in range(100_000)
+        ]
+        t0 = time.monotonic()
+        for chunk in chunks:
+            policy.evaluate_item(chunk)
+        dt = time.monotonic() - t0
+        # Budget allows for CI/load variability. O(n²) would be minutes.
+        assert dt < 10.0, f"100K evaluations took {dt:.1f}s (budget: 10s)"
