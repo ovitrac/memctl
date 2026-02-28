@@ -241,6 +241,7 @@ def cmd_push(args: argparse.Namespace) -> None:
 
     # --- Phase 1: Ingest (optional) ---
     if args.source:
+        from memctl.policy import MemoryPolicy
         tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
         try:
             resolved = resolve_sources(args.source)
@@ -249,6 +250,8 @@ def cmd_push(args: argparse.Namespace) -> None:
             store.close()
             sys.exit(1)
 
+        # R4: single policy instance shared across all files in the batch
+        batch_policy = MemoryPolicy()
         total = IngestResult()
         for path in resolved:
             r = ingest_file(
@@ -258,6 +261,7 @@ def cmd_push(args: argparse.Namespace) -> None:
                 tags=tags,
                 format_mode="auto",
                 injectable=True,  # push mode: injectable by design
+                policy=batch_policy,
             )
             total.files_processed += r.files_processed
             total.files_skipped += r.files_skipped

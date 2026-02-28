@@ -4,6 +4,43 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.22.0] — 2026-02-28
+
+### Performance
+
+- **R1: Content-length short-circuit.** Oversized content (>2048 chars,
+  non-pointer) is now rejected with an O(1) length check *before* any
+  regex patterns run. Previously, all 35 patterns were evaluated first.
+  Oversized chunks: ~2500 µs → <1 µs.
+  Files: `memctl/policy.py`.
+
+- **R2: Early exit on first hard-block.** Secret, injection, and
+  instructional-content checks now return immediately on the first
+  match instead of accumulating all matches. Reduces worst-case
+  evaluation time for malicious content.
+  Files: `memctl/policy.py`.
+
+- **R3: Hot pattern optimization.** Three patterns responsible for 36%
+  of regex budget optimized:
+  - Secret #4 (`password=`): added `\b` word boundary — eliminates
+    false scans on `xpassword`, `nopassword`, etc.
+  - Inst-quarantine #2 (`must always`): added `\b` word boundary.
+  - Secret #9 (base64): precheck skips regex entirely when `=` is
+    absent from text.
+  Clean 2000-char text: 484 → 370 µs (-24%).
+  Files: `memctl/policy.py`.
+
+- **R4: Batch policy amortization.** `memctl push --source` creates
+  a single `MemoryPolicy()` instance shared across all files in the
+  batch, avoiding per-file instantiation overhead.
+  File: `memctl/cli.py`.
+
+### Tests
+
+- 11 new tests in `TestPolicyOptimizations` (R1–R3 coverage +
+  performance regression guard at <400 µs for 2000-char text).
+- Total: 1204 passed, 5 skipped.
+
 ## [0.21.1] — 2026-02-26
 
 ### Added

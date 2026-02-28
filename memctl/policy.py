@@ -64,7 +64,7 @@ _SECRET_PATTERNS = [
     re.compile(r"-----BEGIN\s+PEM-----", re.IGNORECASE),
     re.compile(r"-----BEGIN\s+CERTIFICATE-----", re.IGNORECASE),
     re.compile(r"(?:api[_-]?key|apikey)\s*[:=]\s*\S{8,}", re.IGNORECASE),
-    re.compile(r"(?:secret|token|password|passwd|pwd)\s*[:=]\s*\S{8,}", re.IGNORECASE),
+    re.compile(r"\b(?:secret|token|password|passwd|pwd)\s*[:=]\s*\S{8,}", re.IGNORECASE),
     re.compile(r"(?:aws_access_key_id|aws_secret_access_key)\s*[:=]\s*\S+", re.IGNORECASE),
     re.compile(r"ghp_[A-Za-z0-9]{36,}", re.IGNORECASE),  # GitHub PAT
     re.compile(r"sk-[A-Za-z0-9]{20,}", re.IGNORECASE),    # OpenAI-style key
@@ -104,7 +104,7 @@ _INSTRUCTIONAL_BLOCK_PATTERNS = [
 _INSTRUCTIONAL_QUARANTINE_PATTERNS = [
     re.compile(r"(?:always|never)\s+(?:remember|forget)\s+(?:to\s+)?", re.IGNORECASE),
     re.compile(r"in\s+(?:future|subsequent|later)\s+(?:sessions?|conversations?|turns?)", re.IGNORECASE),
-    re.compile(r"(?:you\s+)?(?:must|should|shall)\s+(?:always|never)\s+", re.IGNORECASE),
+    re.compile(r"\b(?:you\s+)?(?:must|should|shall)\s+(?:always|never)\s+", re.IGNORECASE),
     re.compile(r"(?:from\s+now\s+on|henceforth|going\s+forward)\s*[,.]?\s+", re.IGNORECASE),
 ]
 
@@ -153,44 +153,35 @@ class MemoryPolicy:
 
     def evaluate_proposal(self, proposal: MemoryProposal) -> PolicyVerdict:
         """Evaluate a memory proposal. Returns verdict with action and reasons."""
-        reasons: List[str] = []
-        action: PolicyAction = "accept"
+
+        # R1: Content-length short-circuit — O(1) check before regex patterns
+        if (
+            len(proposal.content) > self._config.max_content_length
+            and proposal.type != "pointer"
+        ):
+            return PolicyVerdict(action="reject", reasons=[
+                f"Content too long ({len(proposal.content)} chars > "
+                f"{self._config.max_content_length}); use type='pointer'"
+            ])
 
         text = f"{proposal.title} {proposal.content}"
 
-        # --- Hard blocks ---
+        # --- Hard blocks (R2: early exit on first match) ---
         if self._config.secret_patterns_enabled:
             secret_hits = self._check_secrets(text)
             if secret_hits:
-                reasons.extend(secret_hits)
-                action = "reject"
+                return PolicyVerdict(action="reject", reasons=secret_hits)
 
         if self._config.injection_patterns_enabled:
             inject_hits = self._check_injection(text)
             if inject_hits:
-                reasons.extend(inject_hits)
-                action = "reject"
+                return PolicyVerdict(action="reject", reasons=inject_hits)
 
         # V3.3: Instructional-content block patterns
         if self._config.instructional_content_enabled:
             inst_block_hits = self._check_instructional_block(text)
             if inst_block_hits:
-                reasons.extend(inst_block_hits)
-                action = "reject"
-
-        # Oversized content (must use pointer type)
-        if (
-            len(proposal.content) > self._config.max_content_length
-            and proposal.type != "pointer"
-        ):
-            reasons.append(
-                f"Content too long ({len(proposal.content)} chars > "
-                f"{self._config.max_content_length}); use type='pointer'"
-            )
-            action = "reject"
-
-        if action == "reject":
-            return PolicyVerdict(action="reject", reasons=reasons)
+                return PolicyVerdict(action="reject", reasons=inst_block_hits)
 
         # --- Soft blocks ---
         quarantine_reasons: List[str] = []
@@ -238,48 +229,44 @@ class MemoryPolicy:
         """
         Evaluate an existing MemoryItem (for direct writes or tier promotion).
         """
-        reasons: List[str] = []
-        action: PolicyAction = "accept"
+        # R1: Content-length short-circuit — O(1) check before regex patterns
+        if (
+            len(item.content) > self._config.max_content_length
+            and item.type != "pointer"
+        ):
+            return PolicyVerdict(
+                action="reject",
+                reasons=["Content too long for non-pointer type"],
+            )
+
+        # Provenance required for MTM/LTM (cheap check, before regex)
+        if item.tier in self._config.require_provenance_for:
+            if not item.provenance.source_id:
+                return PolicyVerdict(
+                    action="reject",
+                    reasons=[
+                        f"Provenance source_id required for tier={item.tier}"
+                    ],
+                )
 
         text = f"{item.title} {item.content}"
 
-        # Hard blocks
+        # --- Hard blocks (R2: early exit on first match) ---
         if self._config.secret_patterns_enabled:
             secret_hits = self._check_secrets(text)
             if secret_hits:
-                reasons.extend(secret_hits)
-                action = "reject"
+                return PolicyVerdict(action="reject", reasons=secret_hits)
 
         if self._config.injection_patterns_enabled:
             inject_hits = self._check_injection(text)
             if inject_hits:
-                reasons.extend(inject_hits)
-                action = "reject"
+                return PolicyVerdict(action="reject", reasons=inject_hits)
 
         # V3.3: Instructional-content block patterns
         if self._config.instructional_content_enabled:
             inst_block_hits = self._check_instructional_block(text)
             if inst_block_hits:
-                reasons.extend(inst_block_hits)
-                action = "reject"
-
-        if (
-            len(item.content) > self._config.max_content_length
-            and item.type != "pointer"
-        ):
-            reasons.append("Content too long for non-pointer type")
-            action = "reject"
-
-        # Provenance required for MTM/LTM
-        if item.tier in self._config.require_provenance_for:
-            if not item.provenance.source_id:
-                reasons.append(
-                    f"Provenance source_id required for tier={item.tier}"
-                )
-                action = "reject"
-
-        if action == "reject":
-            return PolicyVerdict(action="reject", reasons=reasons)
+                return PolicyVerdict(action="reject", reasons=inst_block_hits)
 
         # --- Soft blocks (v0.7) ---
         quarantine_reasons: List[str] = []
@@ -318,7 +305,11 @@ class MemoryPolicy:
     def _check_secrets(self, text: str) -> List[str]:
         """Check for secret patterns. Returns list of match descriptions."""
         hits = []
+        # R3: precheck — skip expensive base64 pattern (#9) if no '=' in text
+        has_equals = "=" in text
         for i, pattern in enumerate(_SECRET_PATTERNS):
+            if i == 9 and not has_equals:
+                continue  # base64 requires padding char
             if pattern.search(text):
                 hits.append(f"HARD_BLOCK: secret pattern #{i} matched")
         return hits
