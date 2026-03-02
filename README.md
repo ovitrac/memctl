@@ -11,7 +11,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.22.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Version](https://img.shields.io/badge/version-0.22.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
 [![Tests](https://img.shields.io/badge/tests-1204%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-21%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
@@ -203,7 +203,11 @@ memctl <command> [options]
 | `promote ID [--tier T]` | Promote item to higher tier (STM→MTM→LTM) |
 | `diff ID1 [ID2]` | Compare two items or item vs revision |
 | `reindex [--tokenizer P]` | Rebuild FTS5 index (optionally with new tokenizer) |
+| `reset [--confirm]` | Truncate all memory content (preserves schema + mounts) |
 | `doctor [--json]` | Environment health check (10 diagnostic checks) |
+| `hooks <name>` | Run a Claude Code hook (eco-hint, eco-nudge, safety-guard, audit-logger) |
+| `hooks-path` | Print directories containing hook template scripts |
+| `scripts-path` | Print path to bundled installer scripts |
 | `serve [--transport T]` | Start MCP server (`stdio`/`streamable-http`/`sse`) |
 
 ### Global Flags
@@ -579,7 +583,7 @@ memctl chat --llm "claude -p" --source docs/ --session --store
 
 ## MCP Server
 
-memctl exposes 20 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
+memctl exposes 21 MCP tools for integration with Claude Code, Claude Desktop, and any MCP-compatible client.
 
 ### Quick Install
 
@@ -834,16 +838,16 @@ memctl/
 ├── ask.py             One-shot folder Q&A orchestrator
 ├── query.py           FTS query normalization and intent classification
 ├── export_import.py   JSONL export/import with policy enforcement
-├── cli.py             21 CLI commands
+├── cli.py             26 CLI commands
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex + JSON stdin)
 └── mcp/
-    ├── tools.py       20 MCP tools (memory_* prefix)
+    ├── tools.py       21 MCP tools (memory_* prefix)
     ├── formatting.py  Injection block format (format_version=1)
     └── server.py      FastMCP server entry point
 ```
 
-30 source files. ~12,800 lines. Zero compiled dependencies for core.
+35 source files. ~13,800 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 
@@ -888,7 +892,7 @@ Expert override: `memctl init --fts-tokenizer "porter unicode61 remove_diacritic
 | Office Documents | `.docx` `.odt` | `pip install memctl[docs]` |
 | Presentations | `.pptx` `.odp` | `pip install memctl[docs]` |
 | Spreadsheets | `.xlsx` `.ods` | `pip install memctl[docs]` |
-| PDF | `.pdf` | `pdftotext` (poppler-utils) |
+| PDF | `.pdf` | `pip install memctl[docs]` (`pypdf`) or `pdftotext` (poppler-utils) |
 
 All formats are extracted to plain text before chunking and ingestion. Binary format libraries are lazy-imported — a missing library produces a clear `ImportError` with install instructions.
 
@@ -1003,7 +1007,7 @@ pip install memctl[dev]
 pytest tests/ -v
 ```
 
-1132 tests across 25 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, and environment diagnostics.
+1204 tests across 42 test files covering types, store, policy, ingest, text extraction, similarity, loop controller, mount, sync, inspect, ask, chat, export/import, config, forward compatibility, contracts, CLI (subprocess), pipe composition, MCP tools, PII detection, config validation, exit codes, query normalization, injection integrity, mode classification, escalation ladder, proposer parsing, eco templates, memory reset, hooks, environment diagnostics, and policy performance.
 
 ---
 
@@ -1014,6 +1018,7 @@ pytest tests/ -v
 | **[`README.md`](README.md)** | This file — overview, CLI reference, MCP server, architecture |
 | **[`QUICKSTART.md`](QUICKSTART.md)** | General quickstart: install, first memory, ingest, ask, MCP setup, FAQ |
 | **[`ECO_QUICKSTART.md`](ECO_QUICKSTART.md)** | eco mode for Claude Code: first session, query tips, workflow patterns, binary formats |
+| **[`SECURITY.md`](SECURITY.md)** | Security policy, responsible disclosure, threat model |
 | **[`CHANGELOG.md`](CHANGELOG.md)** | Full release history (Keep a Changelog format) |
 | **[`extras/eco/ECO.md`](extras/eco/ECO.md)** | eco behavioral strategy (installed at `.claude/eco/ECO.md`) |
 | **[`extras/eco/PILOT.md`](extras/eco/PILOT.md)** | Pilot guidance for team evaluation (20-30 developers, 2-4 weeks) |

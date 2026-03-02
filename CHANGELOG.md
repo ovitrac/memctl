@@ -4,6 +4,18 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.22.1] — 2026-03-02
+
+### Changed
+
+- **README.md refresh.** Stale numbers corrected across the entire file:
+  CLI commands 21 → 26, MCP tools 20 → 21, source files 30 → 35,
+  lines ~12,800 → ~13,800, tests 1132 → 1204, test files 25 → 42.
+  CLI Reference table now includes `reset`, `hooks`, `hooks-path`, and
+  `scripts-path`. PDF format row updated to reflect `pypdf` (via `[docs]`
+  extra) with `pdftotext` fallback. `SECURITY.md` added to Documentation
+  table. Badge version bumped to 0.22.1.
+
 ## [0.22.0] — 2026-02-28
 
 ### Performance
