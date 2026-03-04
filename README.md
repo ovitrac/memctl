@@ -11,8 +11,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.22.1-orange.svg)](https://github.com/ovitrac/memctl/releases)
-[![Tests](https://img.shields.io/badge/tests-1204%20passing-brightgreen.svg)](./tests)
+[![Version](https://img.shields.io/badge/version-0.23.0-orange.svg)](https://github.com/ovitrac/memctl/releases)
+[![Tests](https://img.shields.io/badge/tests-1269%20passing-brightgreen.svg)](./tests)
 [![MCP](https://img.shields.io/badge/MCP-21%20tools-blueviolet.svg)](#mcp-server)
 [![DeepWiki](https://img.shields.io/badge/Docs-DeepWiki-purple.svg)](https://deepwiki.com/ovitrac/memctl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -44,22 +44,31 @@ LLMs forget everything between turns. memctl gives them persistent, structured, 
 pip install memctl
 ```
 
-For Office/ODF document ingestion (.docx, .odt, .pptx, .odp, .xlsx, .ods):
+Or with [pipx](https://pipx.pypa.io/) for isolated CLI installs:
 
 ```bash
-pip install memctl[docs]
+pipx install memctl
 ```
 
 For MCP server support (Claude Code / Claude Desktop):
 
 ```bash
-pip install memctl[mcp]
+pip install memctl[mcp]          # pip
+pipx install "memctl[mcp]"      # pipx (recommended for CLI use)
+```
+
+For Office/ODF document ingestion (.docx, .odt, .pptx, .odp, .xlsx, .ods):
+
+```bash
+pip install memctl[docs]
+pipx inject memctl python-docx python-pptx openpyxl odfpy pypdf   # pipx
 ```
 
 For everything:
 
 ```bash
 pip install memctl[all]
+pipx install "memctl[all]"      # pipx
 ```
 
 **Requirements:** Python 3.10+ (3.12 recommended). No compiled dependencies for core.
@@ -207,6 +216,8 @@ memctl <command> [options]
 | `doctor [--json]` | Environment health check (10 diagnostic checks) |
 | `hooks <name>` | Run a Claude Code hook (eco-hint, eco-nudge, safety-guard, audit-logger) |
 | `hooks-path` | Print directories containing hook template scripts |
+| `setup <target>` | Install integration (`mcp`, `eco`, or `hooks`) — cross-platform |
+| `teardown <target>` | Remove integration (`mcp`, `eco`, or `hooks`) — cross-platform |
 | `scripts-path` | Print path to bundled installer scripts |
 | `serve [--transport T]` | Start MCP server (`stdio`/`streamable-http`/`sse`) |
 
@@ -587,33 +598,35 @@ memctl exposes 21 MCP tools for integration with Claude Code, Claude Desktop, an
 
 ### Quick Install
 
-The installer checks prerequisites, installs `memctl[mcp]`, configures your client, initializes the workspace, and verifies the server starts:
+The cross-platform installer configures your client, initializes the workspace, and verifies the server starts:
 
 ```bash
-# Claude Code (default)
-bash "$(memctl scripts-path)/install_mcp.sh"
+# Claude Code (default) — cross-platform (Python)
+memctl setup mcp
 
 # Claude Desktop
-bash "$(memctl scripts-path)/install_mcp.sh" --client claude-desktop
+memctl setup mcp --client claude-desktop
 
-# Both clients (non-interactive)
-bash "$(memctl scripts-path)/install_mcp.sh" --client all --yes
+# Both clients, non-interactive
+memctl setup mcp --client all --yes
 
-# Custom Python / database path
-bash "$(memctl scripts-path)/install_mcp.sh" --python /usr/bin/python3.12 --db ~/my-project/.memory/memory.db
+# Custom database path
+memctl setup mcp --db ~/my-project/.memory/memory.db
 
 # Preview without changes
-bash "$(memctl scripts-path)/install_mcp.sh" --dry-run
+memctl setup mcp --dry-run
 ```
 
+Legacy Bash installers remain available via `bash "$(memctl scripts-path)/install_mcp.sh"`.
+
 The installer:
-- Verifies Python 3.10+ and pip
-- Runs `pip install -U "memctl[mcp]"` (idempotent)
-- Creates `~/.local/share/memctl/memory.db` if missing
+- Verifies Python 3.10+ and `mcp` package availability
+- Creates `~/.local/share/memctl/memory.db` directory if missing
 - Inserts/updates the `memctl` entry in the client's MCP config (timestamped `.bak` backup)
 - Runs `memctl serve --check` to verify the server starts
+- Works with pip, pipx, and venv installs
 
-Supported platforms: macOS and Linux.
+Supported platforms: macOS, Linux, and Windows.
 
 ### Manual Setup
 
@@ -695,11 +708,11 @@ memctl serve --db memory.db --no-rate-limit
 **Claude Code hooks** (optional, separate from core):
 
 ```bash
-# Install safety guard + audit logger hooks
-bash "$(memctl scripts-path)/install_claude_hooks.sh"
+# Install safety guard + audit logger hooks (cross-platform)
+memctl setup hooks
 
 # Uninstall
-bash "$(memctl scripts-path)/uninstall_mcp.sh" --hooks-only
+memctl teardown hooks
 ```
 
 ### MCP Tools
@@ -768,7 +781,7 @@ This prevents the "0 results" first-impression problem with untrained users.
 
 ```bash
 pip install "memctl[mcp]"
-bash "$(memctl scripts-path)/install_eco.sh" --db-root .memory
+memctl setup eco --db-root .memory
 memctl eco on    # Enable eco mode (required)
 ```
 
@@ -811,7 +824,7 @@ metrics, exit criteria).
 **Uninstall:**
 
 ```bash
-bash "$(memctl scripts-path)/uninstall_eco.sh"
+memctl teardown eco
 # Removes hook + strategy file. Preserves .memory/memory.db and MCP config.
 ```
 
@@ -838,7 +851,8 @@ memctl/
 ├── ask.py             One-shot folder Q&A orchestrator
 ├── query.py           FTS query normalization and intent classification
 ├── export_import.py   JSONL export/import with policy enforcement
-├── cli.py             26 CLI commands
+├── cli.py             28 CLI commands
+├── installer.py       Cross-platform setup/teardown (MCP, eco, hooks)
 ├── consolidate.py     Deterministic merge (Jaccard clustering, no LLM)
 ├── proposer.py        LLM output parsing (delimiter + regex + JSON stdin)
 └── mcp/
@@ -847,7 +861,7 @@ memctl/
     └── server.py      FastMCP server entry point
 ```
 
-35 source files. ~13,800 lines. Zero compiled dependencies for core.
+36 source files. ~14,300 lines. Zero compiled dependencies for core.
 
 ### Memory Tiers
 

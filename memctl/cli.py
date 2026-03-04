@@ -24,6 +24,8 @@ Commands:
     memctl doctor [--json]                   — environment health check
     memctl hooks  <name>                     — run a Claude Code hook (cross-platform)
     memctl hooks-path                        — print hook template directories
+    memctl setup  <target> [--dry-run]       — install integration (mcp, eco, hooks)
+    memctl teardown <target> [--dry-run]     — remove integration (mcp, eco, hooks)
     memctl serve  [--fts-tokenizer FR]       — start MCP server (foreground)
 
 Environment variables:
@@ -1946,6 +1948,23 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
 
 # ===========================================================================
+# Command: setup / teardown
+# ===========================================================================
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    """Install memctl integration (MCP, eco mode, or hooks)."""
+    from memctl.installer import setup_mcp, setup_eco, setup_hooks
+    {"mcp": setup_mcp, "eco": setup_eco, "hooks": setup_hooks}[args.target](args)
+
+
+def cmd_teardown(args: argparse.Namespace) -> None:
+    """Remove memctl integration (MCP, eco mode, or hooks)."""
+    from memctl.installer import teardown_mcp, teardown_eco, teardown_hooks
+    {"mcp": teardown_mcp, "eco": teardown_eco, "hooks": teardown_hooks}[args.target](args)
+
+
+# ===========================================================================
 # Shared argument helper
 # ===========================================================================
 
@@ -2484,6 +2503,43 @@ def main() -> None:
         help="Port for HTTP/SSE transport (default: 8765)",
     )
     p_serve.set_defaults(func=cmd_serve)
+
+    # -- setup -------------------------------------------------------------
+    p_setup = sub.add_parser(
+        "setup", parents=[_common],
+        help="Install memctl integration (MCP, eco, hooks)",
+    )
+    p_setup.add_argument(
+        "target", choices=["mcp", "eco", "hooks"],
+        help="What to install: mcp, eco, or hooks",
+    )
+    p_setup.add_argument(
+        "--client", default="claude-code",
+        choices=["claude-code", "claude-desktop", "all"],
+        help="Target client (default: claude-code)",
+    )
+    p_setup.add_argument("--db-root", default=None, help="Database root for eco mode (default: .memory)")
+    p_setup.add_argument("--dry-run", action="store_true", help="Preview without making changes")
+    p_setup.add_argument("--yes", "-y", action="store_true", help="Non-interactive mode")
+    p_setup.add_argument("--force", action="store_true", help="Overwrite existing files")
+    p_setup.set_defaults(func=cmd_setup)
+
+    # -- teardown ----------------------------------------------------------
+    p_teardown = sub.add_parser(
+        "teardown", parents=[_common],
+        help="Remove memctl integration (MCP, eco, hooks)",
+    )
+    p_teardown.add_argument(
+        "target", choices=["mcp", "eco", "hooks"],
+        help="What to remove: mcp, eco, or hooks",
+    )
+    p_teardown.add_argument(
+        "--client", default="claude-code",
+        choices=["claude-code", "claude-desktop", "all"],
+        help="Target client (default: claude-code)",
+    )
+    p_teardown.add_argument("--dry-run", action="store_true", help="Preview without making changes")
+    p_teardown.set_defaults(func=cmd_teardown)
 
     # -- Parse and dispatch ------------------------------------------------
     args = parser.parse_args()

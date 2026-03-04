@@ -4,6 +4,32 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.23.0] — 2026-03-04
+
+### Added
+
+- **`memctl setup` / `memctl teardown` — cross-platform installer.**
+  Pure-Python replacement for the five Bash-only install/uninstall scripts.
+  Three targets: `mcp`, `eco`, `hooks`. All operations support `--dry-run`,
+  `--yes`, `--force`, and are idempotent with timestamped backups.
+  CLI count: 26 → 28. Windows support unlocked (no Bash dependency).
+  New file: `memctl/installer.py` (~470 lines, stdlib only).
+  Compatible with pip, pipx, and venv installs.
+
+### Changed
+
+- **README.md:** Added pipx installation instructions alongside pip.
+  Updated platform support to include Windows. Refreshed MCP Quick Install
+  section to reference `memctl setup`/`teardown` commands.
+- **pyproject.toml:** Added `Operating System :: Microsoft :: Windows`
+  classifier.
+
+### Tests
+
+- **65 new tests** in `tests/test_installer.py`: helper unit tests,
+  setup/teardown for all three targets, idempotency checks, pipx detection,
+  CLI subprocess tests, and round-trip integration tests.
+
 ## [0.22.1] — 2026-03-02
 
 ### Changed
