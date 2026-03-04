@@ -4,7 +4,7 @@ All notable changes to memctl are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.23.0] — 2026-03-04
+## [0.23.1] — 2026-03-04
 
 ### Added
 
@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Three targets: `mcp`, `eco`, `hooks`. All operations support `--dry-run`,
   `--yes`, `--force`, and are idempotent with timestamped backups.
   CLI count: 26 → 28. Windows support unlocked (no Bash dependency).
-  New file: `memctl/installer.py` (~470 lines, stdlib only).
+  New file: `memctl/installer.py` (~500 lines, stdlib only).
   Compatible with pip, pipx, and venv installs.
 
 ### Changed
@@ -23,6 +23,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   section to reference `memctl setup`/`teardown` commands.
 - **pyproject.toml:** Added `Operating System :: Microsoft :: Windows`
   classifier.
+
+### Fixed
+
+- **R3 perf test CI flake.** `test_r3_performance_improvement` budget
+  raised from 500µs to 1000µs — Python 3.11 on shared CI runners
+  measured 681µs, well within healthy range but above the tight threshold.
+  The test guards against O(n²) regressions, not microsecond precision.
 
 ### Tests
 
